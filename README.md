@@ -3,7 +3,7 @@
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![Neo4j](https://img.shields.io/badge/database-Neo4j-018bff.svg)](https://neo4j.com/)
 [![LLM](https://img.shields.io/badge/LLM-Gemini_1.5_Flash-orange.svg)](https://aistudio.google.com/)
-[![License](https://img.shields.io/badge/license-Apache_2.0-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 **ScholarNexus-KG** (sebelumnya dikenal sebagai *KG_personality*) adalah platform berbasis AI yang dirancang untuk memetakan ekosistem riset secara otomatis. Dengan menggabungkan **Knowledge Graphs (KG)** dan **Large Language Models (LLM)**, sistem ini tidak hanya mengekstraksi metadata, tetapi juga menganalisis "kepribadian" (karakteristik kontribusi) sebuah paper serta melacak silsilah penemuan ilmiah (*research lineage*).
 
