@@ -35,13 +35,30 @@ Sistem ini menggunakan pendekatan **Hybrid RAG (Vector + Graph)**:
 
 ```text
 ScholarNexus-KG/
-├── data/               # Penyimpanan file PDF mentah & cache
+├── data/
+│   ├── raw/                # PDF yang di-upload user
+│   └── processed/          # Hasil ekstraksi JSON (untuk backup/cache)
 ├── src/
-│   ├── extractor/      # Logika PDF Parsing & LLM Prompting
-│   ├── database/       # Konektor Neo4j & Query Cypher
-│   ├── api/            # Integrasi ArXiv API
-│   └── utils/          # Fungsi pembantu (logging, config)
-├── notebooks/          # Eksperimen ekstraksi & analisis graf
-├── .env.example        # Template konfigurasi API Key
-├── main.py             # Entry point aplikasi
-└── requirements.txt    # Dependensi Python
+│   ├── extractor/
+│   │   ├── __init__.py
+│   │   ├── pdf_parser.py       # Logika pypdf untuk ambil teks
+│   │   └── personality.py      # Prompt Gemini untuk "The Pioneer", dll.
+│   ├── database/
+│   │   ├── __init__.py
+│   │   ├── neo4j_connection.py # Singleton koneksi ke Neo4j
+│   │   └── cypher_queries.py   # Script untuk simpan & cari Lineage
+│   ├── api/
+│   │   ├── __init__.py
+│   │   └── arxiv_client.py     # Logika ambil data dari ArXiv API
+│   └── utils/
+│       ├── __init__.py
+│       ├── config.py           # Load .env (API Keys, DB URI)
+│       └── helpers.py          # Fungsi bantu (clean text, dll.)
+├── notebooks/
+│   └── exploration.ipynb       # Tempat coba-coba prompt & query graf
+├── .env                        # Rahasia (API Key, Password DB)
+├── .env.example                # Template untuk orang lain
+├── .gitignore                  # Kecualikan .env, venv, & data/
+├── main.py                     # Script utama (Orchestrator)
+├── requirements.txt            # List library (langchain, neo4j, pypdf)
+└── LICENSE                     # MIT License
