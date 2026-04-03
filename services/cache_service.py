@@ -3,6 +3,10 @@ import time
 from typing import Optional
 from services.arxiv_service import ArxivPaper, rate_limited
 from services.cache_service import paper_cache
+import json
+import logging
+from typing import Optional
+from fastapi import Request
 
 class PaperCache:
     """
@@ -269,3 +273,66 @@ def _jaccard_similarity(a: str, b: str) -> float:
 
 # Singleton service
 arxiv_service = ArxivService()
+
+logger = logging.getLogger(__name__)
+
+
+class RedisCacheService:
+    """
+    Production cache menggunakan Redis.
+    Dipanggil via app.state.redis yang diinisialisasi di lifespan().
+    """
+
+    def __init__(self, request: Request):
+        self._redis = request.app.state.redis
+        self._ttl   = 7 * 24 * 3600   # 7 hari default
+
+    async def get(self, key: str) -> Optional[dict]:
+        try:
+            raw = await self._redis.get(self._normalize(key))
+            return json.loads(raw) if raw else None
+        except Exception as e:
+            logger.warning(f"Cache GET error for {key}: {e}")
+            return None
+
+    async def set(self, key: str, data: dict, ttl: int = None) -> bool:
+        try:
+            await self._redis.setex(
+                self._normalize(key),
+                ttl or self._ttl,
+                json.dumps(data, default=str),
+            )
+            return True
+        except Exception as e:
+            logger.warning(f"Cache SET error for {key}: {e}")
+            return False
+
+    async def exists(self, key: str) -> bool:
+        try:
+            return bool(await self._redis.exists(self._normalize(key)))
+        except Exception:
+            return False
+
+    async def delete(self, key: str) -> bool:
+        try:
+            await self._redis.delete(self._normalize(key))
+            return True
+        except Exception:
+            return False
+
+    async def get_stats(self) -> dict:
+        """Statistik penggunaan cache untuk monitoring."""
+        try:
+            info = await self._redis.info("stats")
+            return {
+                "hits":   info.get("keyspace_hits", 0),
+                "misses": info.get("keyspace_misses", 0),
+                "keys":   await self._redis.dbsize(),
+            }
+        except Exception:
+            return {}
+
+    @staticmethod
+    def _normalize(key: str) -> str:
+        import re
+        return "kg:" + re.sub(r"v\d+$", "", key.strip())

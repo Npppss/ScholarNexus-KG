@@ -1,0 +1,28 @@
+# docker-compose.dev.yml
+services:
+
+  fastapi:
+    build:
+      target: development       # pakai stage dev dengan hot-reload
+    volumes:
+      - .:/app                  # mount seluruh project (live reload)
+    environment:
+      LOG_LEVEL: DEBUG
+      PYTHONDONTWRITEBYTECODE: "1"
+
+  neo4j:
+    environment:
+      NEO4J_dbms_logs_debug_level: "DEBUG"
+
+  # Tambah Redis Commander untuk dev UI
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: kg_redis_ui
+    ports:
+      - "8081:8081"
+    environment:
+      REDIS_HOSTS: local:redis:6379
+    depends_on:
+      - redis
+    networks:
+      - kg_network

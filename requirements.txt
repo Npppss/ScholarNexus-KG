@@ -1,0 +1,28 @@
+# Web framework
+fastapi==0.111.0
+uvicorn[standard]==0.30.1
+python-multipart==0.0.9      # untuk file upload
+
+# Neo4j
+neo4j==5.20.0
+
+# Redis
+redis==5.0.4
+
+# LLM
+google-generativeai==0.7.2
+openai==1.35.0               # opsional
+
+# PDF
+PyMuPDF==1.24.5
+
+# ArXiv
+arxiv==2.1.0
+
+# Data & Utils
+pydantic==2.7.4
+pydantic-settings==2.3.4
+httpx==0.27.0
+
+# Monitoring
+prometheus-fastapi-instrumentator==7.0.0

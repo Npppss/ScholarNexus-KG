@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks, logger
 from pydantic import BaseModel, field_validator
 from typing import Optional
 
-from services.arxiv_service import arxiv_service
+from services.arxiv_service import ArxivPaper
 from services.graph_service import upsert_paper_to_graph
 from services.vector_service import generate_embedding
 
