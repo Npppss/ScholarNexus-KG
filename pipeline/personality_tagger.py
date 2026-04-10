@@ -1,9 +1,14 @@
 import json
+import re
+import logging
 import google.generativeai as genai
-from pipeline.pdf_extractor import ParsedPaper
+from app.config.settings import settings
 
-genai.configure(api_key="YOUR_GEMINI_API_KEY")
-MODEL = genai.GenerativeModel("gemini-2.5-flash")
+logger = logging.getLogger(__name__)
+
+# ── Configure Gemini dari settings (bukan hardcode) ───────────────────────────
+genai.configure(api_key=settings.gemini_api_key)
+MODEL = genai.GenerativeModel(settings.gemini_model)
 
 # ─────────────────────────────────────────────
 #  PROMPT 1: Metadata Extraction
@@ -91,13 +96,42 @@ Return ONLY this JSON (no markdown, no extra text):
 }}
 """
 
+# ─────────────────────────────────────────────
+#  PROMPT Lightweight: Personality only
+#  (Untuk ArXiv papers yang sudah punya metadata)
+# ─────────────────────────────────────────────
+PERSONALITY_ONLY_PROMPT = """
+You are an expert research analyst. Classify the "personality" of this academic paper.
 
-def run_extraction_pipeline(paper: ParsedPaper) -> dict:
+There are exactly 3 personality types:
+- PIONEER: Introduces a genuinely new method, architecture, or paradigm that did NOT exist before.
+- OPTIMIZER: Improves an existing method — better speed, accuracy, efficiency, or scalability.
+- BRIDGE: Connects two previously separate research domains — applies method from Domain A to Domain B.
+
+PAPER:
+---
+TITLE: {title}
+ABSTRACT: {abstract}
+CATEGORIES: {categories}
+YEAR: {year}
+---
+
+Think step-by-step, then return ONLY this JSON:
+{{
+  "reasoning": "2-3 sentences explaining your classification",
+  "personality_tag": "PIONEER" or "OPTIMIZER" or "BRIDGE",
+  "confidence_score": 0.0-1.0
+}}
+"""
+
+
+def run_extraction_pipeline(paper) -> dict:
     """
-    Jalankan 2-step LLM extraction:
+    Jalankan 2-step LLM extraction dari ParsedPaper (PDF upload flow):
     1. Metadata extraction
     2. Personality classification
     """
+    from pipeline.pdf_extractor import ParsedPaper
 
     # ── Call 1: Metadata ──────────────────────────────
     meta_prompt = METADATA_PROMPT.format(
@@ -128,6 +162,62 @@ def run_extraction_pipeline(paper: ParsedPaper) -> dict:
         "references_raw":   paper.references_raw,
         "sections_found":   list(paper.sections.keys()),
     }
+
+
+def classify_arxiv_paper(
+    title:      str,
+    abstract:   str,
+    categories: list[str] = None,
+    year:       int = None,
+) -> dict:
+    """
+    Classify personality dari ArXiv paper menggunakan 1 LLM call.
+    Lebih lightweight dari full pipeline karena metadata sudah ada dari ArXiv.
+
+    Returns: {"personality_tag": "PIONEER"|"OPTIMIZER"|"BRIDGE",
+              "confidence_score": float, "reasoning": str}
+    """
+    if not settings.gemini_api_key:
+        logger.warning("Gemini API key not set — skipping personality tagging")
+        return {
+            "personality_tag":  None,
+            "confidence_score": 0.0,
+            "reasoning":        "API key not configured",
+        }
+
+    try:
+        prompt = PERSONALITY_ONLY_PROMPT.format(
+            title      = title or "Unknown",
+            abstract   = (abstract or "")[:4000],
+            categories = ", ".join(categories or []),
+            year       = year or "Unknown",
+        )
+
+        response = MODEL.generate_content(prompt)
+        result = _safe_parse_json(response.text)
+
+        # Validate tag
+        valid_tags = {"PIONEER", "OPTIMIZER", "BRIDGE"}
+        tag = result.get("personality_tag", "").upper()
+        if tag not in valid_tags:
+            logger.warning(f"Invalid personality tag '{tag}' — defaulting to None")
+            result["personality_tag"] = None
+            result["confidence_score"] = 0.0
+
+        logger.info(
+            f"🎭 Personality: {result.get('personality_tag')} "
+            f"(confidence={result.get('confidence_score', 0):.2f}) "
+            f"for '{title[:60]}...'"
+        )
+        return result
+
+    except Exception as e:
+        logger.error(f"Personality tagging failed: {e}")
+        return {
+            "personality_tag":  None,
+            "confidence_score": 0.0,
+            "reasoning":        f"Error: {str(e)}",
+        }
 
 
 def _safe_parse_json(text: str) -> dict:

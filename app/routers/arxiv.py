@@ -7,6 +7,7 @@ from services.arxiv_service import ArxivPaper
 from services.graph_service import upsert_paper_to_graph, _make_paper_id, driver, MERGE_PAPER, MERGE_CITES
 from services.vector_service import generate_embedding
 from services.semantic_scholar_service import semantic_scholar_service
+from pipeline.personality_tagger import classify_arxiv_paper
 import logging
 
 log = logging.getLogger(__name__)
@@ -159,10 +160,21 @@ async def expand_from_paper(
 
 # ── Background Tasks ─────────────────────────────────────────────────────────
 async def _persist_arxiv_paper(paper, fetch_refs: bool):
-    """Simpan ArxivPaper ke Neo4j + generate embedding."""
+    """Simpan ArxivPaper ke Neo4j + generate embedding + personality tag."""
+
+    # 1. Generate embedding
     embedding = generate_embedding(f"{paper.title}. {paper.abstract}")
 
-    # Build extraction dict yang diharapkan oleh upsert_paper_to_graph
+    # 2. Personality tagging via Gemini LLM
+    log.info(f"🎭 Tagging personality for: {paper.title[:60]}...")
+    personality = classify_arxiv_paper(
+        title      = paper.title,
+        abstract   = paper.abstract,
+        categories = paper.categories,
+        year       = paper.year,
+    )
+
+    # 3. Build extraction dict
     extraction = {
         "title": paper.title,
         "metadata": {
@@ -175,18 +187,20 @@ async def _persist_arxiv_paper(paper, fetch_refs: bool):
             "topics":   getattr(paper, "categories", []),
         },
         "personality": {
-            "personality_tag":  None,
-            "confidence_score": 0.0,
-            "reasoning":        "",
+            "personality_tag":  personality.get("personality_tag"),
+            "confidence_score": personality.get("confidence_score", 0.0),
+            "reasoning":        personality.get("reasoning", ""),
         },
     }
 
+    # 4. Upsert to Neo4j
     upsert_paper_to_graph(
         extraction  = extraction,
         embedding   = embedding,
         arxiv_paper = paper,
     )
 
+    # 5. Fetch related papers
     if fetch_refs and paper.arxiv_id:
         await _expand_references_background(paper.arxiv_id, depth=1)
 
