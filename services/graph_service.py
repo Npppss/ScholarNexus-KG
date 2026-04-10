@@ -1,5 +1,6 @@
 # services/graph_service.py
 import uuid
+import hashlib
 from neo4j import GraphDatabase
 from app.config.settings import settings
 
@@ -329,53 +330,97 @@ class GraphService:
     ) -> dict:
         """
         Kembalikan silsilah riset sebuah paper sebagai graph structure
-        yang siap di-render oleh frontend (nodes + edges).
+        yang siap di-render oleh frontend (vis.js nodes + edges).
         """
         depth = min(max_depth, 6)  # hard cap mencegah query terlalu lambat
 
-        if direction == "ancestors":
-            query = """
-                MATCH path = (root:Paper {arxiv_id: $arxiv_id})
-                             -[:CITES*1..$depth]->(ancestor:Paper)
-                WHERE ancestor.unresolved = false
-                WITH ancestor, length(path) AS depth
-                RETURN ancestor {
-                    .paper_id, .title, .year, .arxiv_id,
-                    .personality_tag, .confidence_score,
-                    .primary_category, depth
-                } AS node, depth
-                ORDER BY depth ASC, ancestor.year DESC
-                LIMIT 60
-            """
-        elif direction == "descendants":
-            query = """
-                MATCH path = (child:Paper)
-                             -[:CITES*1..$depth]->(root:Paper {arxiv_id: $arxiv_id})
-                WHERE child.unresolved = false
-                AND child.paper_id <> root.paper_id
-                WITH child, length(path) AS depth
-                RETURN child {
-                    .paper_id, .title, .year, .arxiv_id,
-                    .personality_tag, .confidence_score,
-                    .primary_category, depth
-                } AS node, depth
-                ORDER BY depth ASC, child.year DESC
-                LIMIT 40
-            """
-
         with driver.session() as session:
-            result   = session.run(query, arxiv_id=arxiv_id, depth=depth)
-            nodes    = [dict(r["node"]) for r in result]
+            # ── 1. Selalu fetch root paper ─────────────────────────────────
+            root_result = session.run(
+                """
+                MATCH (p:Paper {arxiv_id: $arxiv_id})
+                RETURN p {
+                    .paper_id, .title, .year, .arxiv_id,
+                    .personality_tag, .confidence_score,
+                    .primary_category
+                } AS node
+                """,
+                arxiv_id=arxiv_id
+            ).single()
 
-            # Ambil edges yang menghubungkan nodes yang sudah kita ambil
+            nodes = []
+            if root_result:
+                root_node = dict(root_result["node"])
+                root_node["depth"] = 0
+                root_node["id"] = root_node["paper_id"]
+                root_node["label"] = root_node.get("title", arxiv_id)[:50]
+                nodes.append(root_node)
+
+            # ── 2. Fetch related nodes via CITES ──────────────────────────
+            if direction in ("ancestors", "both"):
+                query = f"""
+                    MATCH path = (root:Paper {{arxiv_id: $arxiv_id}})
+                                 -[:CITES*1..{depth}]->(ancestor:Paper)
+                    WHERE ancestor.unresolved = false
+                    WITH ancestor, length(path) AS d
+                    RETURN ancestor {{
+                        .paper_id, .title, .year, .arxiv_id,
+                        .personality_tag, .confidence_score,
+                        .primary_category, depth: d
+                    }} AS node, d AS depth
+                    ORDER BY d ASC, ancestor.year DESC
+                    LIMIT 60
+                """
+                result = session.run(query, arxiv_id=arxiv_id)
+                for r in result:
+                    n = dict(r["node"])
+                    n["id"] = n["paper_id"]
+                    n["label"] = n.get("title", "?")[:50]
+                    if not any(existing["paper_id"] == n["paper_id"] for existing in nodes):
+                        nodes.append(n)
+
+            if direction in ("descendants", "both"):
+                query = f"""
+                    MATCH path = (child:Paper)
+                                 -[:CITES*1..{depth}]->(root:Paper {{arxiv_id: $arxiv_id}})
+                    WHERE child.unresolved = false
+                    AND child.paper_id <> root.paper_id
+                    WITH child, length(path) AS d
+                    RETURN child {{
+                        .paper_id, .title, .year, .arxiv_id,
+                        .personality_tag, .confidence_score,
+                        .primary_category, depth: d
+                    }} AS node, d AS depth
+                    ORDER BY d ASC, child.year DESC
+                    LIMIT 40
+                """
+                result = session.run(query, arxiv_id=arxiv_id)
+                for r in result:
+                    n = dict(r["node"])
+                    n["id"] = n["paper_id"]
+                    n["label"] = n.get("title", "?")[:50]
+                    if not any(existing["paper_id"] == n["paper_id"] for existing in nodes):
+                        nodes.append(n)
+
+            # ── 3. Fetch edges ────────────────────────────────────────────
             node_ids = [n["paper_id"] for n in nodes]
-            edges    = self._get_edges_between(node_ids)
+            edges = self._get_edges_between(node_ids) if len(node_ids) > 1 else []
+
+        # Format edges for vis.js (needs from/to instead of source/target)
+        vis_edges = []
+        for e in edges:
+            vis_edges.append({
+                "from": e["source"],
+                "to":   e["target"],
+                "label": "CITES",
+                "arrows": "to",
+            })
 
         return {
             "root":      arxiv_id,
             "direction": direction,
             "nodes":     nodes,
-            "edges":     edges,
+            "edges":     vis_edges,
             "depth":     depth,
         }
 

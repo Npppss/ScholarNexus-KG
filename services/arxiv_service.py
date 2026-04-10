@@ -125,11 +125,28 @@ class RateLimiter:
 # Singleton rate limiter — shared across all ArxivService instances
 _rate_limiter = RateLimiter(calls_per_second=3.0)
 
-
 def rate_limited(func):
-    """Decorator untuk otomatis apply rate limiting."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         _rate_limiter.acquire()
         return func(*args, **kwargs)
     return wrapper
+
+# 4. Definisi Class Utama
+class ArxivService:
+    def __init__(self):
+        self.client = arxiv.Client()
+
+    @rate_limited  # Sekarang Python sudah kenal fungsi ini
+    def fetch_by_id(self, arxiv_id: str) -> Optional[ArxivPaper]:
+        clean_id = re.sub(r"v\d+$", "", arxiv_id.strip())
+        try:
+            search = arxiv.Search(id_list=[clean_id])
+            results = list(self.client.results(search))
+            return ArxivPaper.from_arxiv_result(results[0]) if results else None
+        except Exception as e:
+            logger.error(f"ArXiv Error: {e}")
+            return None
+
+# 5. Export Singleton (Yang dicari oleh Routers)
+arxiv_service = ArxivService()

@@ -3,7 +3,7 @@ import google.generativeai as genai
 from pipeline.pdf_extractor import ParsedPaper
 
 genai.configure(api_key="YOUR_GEMINI_API_KEY")
-MODEL = genai.GenerativeModel("gemini-1.5-flash")
+MODEL = genai.GenerativeModel("gemini-2.5-flash")
 
 # ─────────────────────────────────────────────
 #  PROMPT 1: Metadata Extraction

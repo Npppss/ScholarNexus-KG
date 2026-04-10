@@ -8,14 +8,14 @@ class Settings(BaseSettings):
     arxiv_similarity_threshold: float = 0.55
 
     # Neo4j
-    neo4j_uri:      str = "neo4j+s://d99ffd6c.databases.neo4j.io"
-    neo4j_user:     str = "d99ffd6c"
-    neo4j_password: str = "99fZz-u3p2mZYlTGX4V2FumstQj9fDgwAAAQ-QeVGwc"
+    neo4j_uri:      str = "bolt://neo4j:7687"
+    neo4j_user:     str = "neo4j"
+    neo4j_password: str = "scholarNexus2024"
 
     # Gemini
     gemini_api_key: str = ""
-    gemini_model:   str = "gemini-1.5-flash"
-    embedding_model: str = "models/text-embedding-004"
+    gemini_model:   str = "gemini-2.5-flash"
+    embedding_model: str = "models/gemini-embedding-001"
     openai_api_key: str = "" 
 
     # Redis & App Config

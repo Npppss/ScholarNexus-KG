@@ -1,10 +1,15 @@
 from fastapi import APIRouter, HTTPException, BackgroundTasks, logger
 from pydantic import BaseModel, field_validator
 from typing import Optional
-
+import arxiv
+from services.arxiv_service import arxiv_service
 from services.arxiv_service import ArxivPaper
-from services.graph_service import upsert_paper_to_graph
+from services.graph_service import upsert_paper_to_graph, _make_paper_id, driver, MERGE_PAPER, MERGE_CITES
 from services.vector_service import generate_embedding
+from services.semantic_scholar_service import semantic_scholar_service
+import logging
+
+log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/arxiv", tags=["arxiv"])
 
@@ -156,17 +161,119 @@ async def expand_from_paper(
 async def _persist_arxiv_paper(paper, fetch_refs: bool):
     """Simpan ArxivPaper ke Neo4j + generate embedding."""
     embedding = generate_embedding(f"{paper.title}. {paper.abstract}")
+
+    # Build extraction dict yang diharapkan oleh upsert_paper_to_graph
+    extraction = {
+        "title": paper.title,
+        "metadata": {
+            "abstract": getattr(paper, "abstract", ""),
+            "year":     getattr(paper, "year", None),
+            "venue":    getattr(paper, "venue_parsed", None),
+            "authors":  getattr(paper, "authors", []),
+            "methods_proposed": [],
+            "methods_used_as_baseline": [],
+            "topics":   getattr(paper, "categories", []),
+        },
+        "personality": {
+            "personality_tag":  None,
+            "confidence_score": 0.0,
+            "reasoning":        "",
+        },
+    }
+
     upsert_paper_to_graph(
-        arxiv_paper = paper,
+        extraction  = extraction,
         embedding   = embedding,
+        arxiv_paper = paper,
     )
+
     if fetch_refs and paper.arxiv_id:
         await _expand_references_background(paper.arxiv_id, depth=1)
 
 
 async def _expand_references_background(arxiv_id: str, depth: int):
-    """Background task: ambil referensi dan masukkan ke graph."""
-    logger.info(f"Expanding references for {arxiv_id} at depth={depth}")
-    # Implementation: fetch related papers via ArXiv search
-    # menggunakan judul paper utama sebagai seed query
-    pass    
+    """
+    Background task: fetch references + citations dari Semantic Scholar
+    dan buat node stub + relasi CITES di Neo4j.
+    """
+    log.info(f"🔗 Expanding references for {arxiv_id} at depth={depth}")
+
+    try:
+        # 1. Fetch dari Semantic Scholar API
+        result = semantic_scholar_service.get_references_and_citations(arxiv_id)
+        references = result["references"]
+        citations  = result["citations"]
+
+        log.info(f"   Found {len(references)} references, {len(citations)} citations")
+
+        # 2. paper_id dari paper saat ini
+        source_paper_id = _make_paper_id(arxiv_id=arxiv_id)
+
+        with driver.session() as session:
+            # 3. Buat stub nodes untuk references + relasi CITES
+            #    (source paper) -[:CITES]-> (referenced paper)
+            for ref in references:
+                ref_paper_id = _make_paper_id(
+                    title=ref.title, year=ref.year, arxiv_id=ref.arxiv_id
+                )
+                # Create stub Paper node
+                session.run(MERGE_PAPER, {
+                    "paper_id":         ref_paper_id,
+                    "title":            ref.title,
+                    "abstract":         "",
+                    "year":             ref.year,
+                    "venue":            None,
+                    "arxiv_id":         ref.arxiv_id,
+                    "doi":              ref.doi,
+                    "personality_tag":  None,
+                    "confidence_score": 0.0,
+                    "reasoning":        "",
+                    "primary_category": None,
+                    "embedding":        None,
+                    "unresolved":       not ref.found_on_arxiv,
+                })
+                # Create CITES relationship
+                session.run(MERGE_CITES, {
+                    "source_paper_id": source_paper_id,
+                    "target_paper_id": ref_paper_id,
+                    "context":         ref.raw_text[:200],
+                    "confidence":      1.0 if ref.found_on_arxiv else 0.7,
+                    "resolved_via":    "semantic_scholar",
+                })
+
+            # 4. Buat stub nodes untuk citations + relasi CITES
+            #    (citing paper) -[:CITES]-> (source paper)
+            for cit in citations:
+                cit_paper_id = _make_paper_id(
+                    title=cit.title, year=cit.year, arxiv_id=cit.arxiv_id
+                )
+                # Create stub Paper node
+                session.run(MERGE_PAPER, {
+                    "paper_id":         cit_paper_id,
+                    "title":            cit.title,
+                    "abstract":         "",
+                    "year":             cit.year,
+                    "venue":            None,
+                    "arxiv_id":         cit.arxiv_id,
+                    "doi":              cit.doi,
+                    "personality_tag":  None,
+                    "confidence_score": 0.0,
+                    "reasoning":        "",
+                    "primary_category": None,
+                    "embedding":        None,
+                    "unresolved":       not cit.found_on_arxiv,
+                })
+                # Create CITES relationship (citing paper cites source)
+                session.run(MERGE_CITES, {
+                    "source_paper_id": cit_paper_id,
+                    "target_paper_id": source_paper_id,
+                    "context":         cit.raw_text[:200],
+                    "confidence":      1.0 if cit.found_on_arxiv else 0.7,
+                    "resolved_via":    "semantic_scholar",
+                })
+
+        total = len(references) + len(citations)
+        log.info(f"✅ Expanded {arxiv_id}: {total} related papers added to graph")
+
+    except Exception as e:
+        log.error(f"❌ Failed to expand references for {arxiv_id}: {e}")    
