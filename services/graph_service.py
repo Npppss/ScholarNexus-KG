@@ -499,26 +499,55 @@ class GraphService:
     # ── Analytics ─────────────────────────────────────────────────────────
     def get_graph_stats(self) -> dict:
         """Dashboard stats untuk monitoring Knowledge Graph."""
+        import logging
+        logger = logging.getLogger(__name__)
+
         query = """
             MATCH (p:Paper)
             WITH
               count(p)                                          AS total_papers,
               count(p.personality_tag)                          AS tagged_papers,
-              count(CASE WHEN p.unresolved = true THEN 1 END)  AS stubs,
+              count(CASE WHEN p.unresolved = true THEN 1 END)   AS stubs,
               count(CASE WHEN p.embedding IS NOT NULL THEN 1 END) AS embedded
-            MATCH ()-[r:CITES]->()
-            WITH total_papers, tagged_papers, stubs, embedded,
-                 count(r) AS total_citations
-            MATCH ()-[s:SIMILAR_TO]->()
+            
+            OPTIONAL MATCH ()-[r:CITES]->()
+            WITH total_papers, tagged_papers, stubs, embedded, count(r) AS total_citations
+            
+            OPTIONAL MATCH ()-[s:SIMILAR_TO]->()
             RETURN
               total_papers, tagged_papers, stubs, embedded,
               total_citations,
               count(s) AS similarity_edges,
-              round(toFloat(tagged_papers)/total_papers * 100) AS pct_tagged
+              CASE WHEN total_papers > 0 THEN round(toFloat(tagged_papers)/total_papers * 100) ELSE 0.0 END AS pct_tagged
         """
-        with driver.session() as session:
-            result = session.run(query)
-            return dict(result.single())
+        try:
+            with driver.session() as session:
+                result = session.run(query)
+                record = result.single()
+                
+                if record is None:
+                    logger.warning("Neo4j graph stats query returned None. Graph may be totally empty or disconnected. Defaulting to zeroes.")
+                    return {
+                        "total_papers": 0,
+                        "tagged_papers": 0,
+                        "stubs": 0,
+                        "embedded": 0,
+                        "total_citations": 0,
+                        "similarity_edges": 0,
+                        "pct_tagged": 0.0
+                    }
+                return dict(record)
+        except Exception as e:
+            logger.error(f"Error fetching graph stats: {e}", exc_info=True)
+            return {
+                "total_papers": 0,
+                "tagged_papers": 0,
+                "stubs": 0,
+                "embedded": 0,
+                "total_citations": 0,
+                "similarity_edges": 0,
+                "pct_tagged": 0.0
+            }
 
     def get_personality_distribution(self) -> list[dict]:
         query = """
