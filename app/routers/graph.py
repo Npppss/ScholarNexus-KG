@@ -84,3 +84,25 @@ async def export_bibtex(arxiv_id: str, depth: int = Query(3, ge=1, le=6)):
         bibtex_entries.append(entry)
         
     return "\n\n".join(bibtex_entries)
+
+
+@router.post("/cognitive-search/{paper_id}")
+async def cognitive_search(
+    paper_id: str,
+    decay: float = Query(0.85, ge=0.1, le=0.95),      # Higher decay retention
+    threshold: float = Query(0.01, ge=0.001, le=0.5), # Lower drop-off threshold
+    max_depth: int = Query(6, ge=1, le=8),
+    max_results: int = Query(50, ge=5, le=100),
+):
+    """
+    Cognitive Search — Spreading Activation Network.
+    Simulates human associative thinking to discover serendipitous connections.
+    """
+    from services.cognitive_service import CognitiveSearch
+
+    engine = CognitiveSearch(
+        decay_factor=decay,
+        threshold=threshold,
+        max_depth=max_depth,
+    )
+    return engine.activate(paper_id, max_results=max_results)

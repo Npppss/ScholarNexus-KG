@@ -288,6 +288,7 @@ def upsert_paper_to_graph(
                     "primary_category": None,
                     "embedding":        None,   # akan diisi saat paper ini di-fetch
                     "unresolved":       not ref.found_on_arxiv,
+                    "authors_text":     "",
                 })
                 session.run(MERGE_CITES, {
                     "source_paper_id": paper_id,

@@ -247,6 +247,7 @@ async def _expand_references_background(arxiv_id: str, depth: int):
                     "primary_category": None,
                     "embedding":        None,
                     "unresolved":       not ref.found_on_arxiv,
+                    "authors_text":     "",
                 })
                 # Create CITES relationship
                 session.run(MERGE_CITES, {
@@ -278,6 +279,7 @@ async def _expand_references_background(arxiv_id: str, depth: int):
                     "primary_category": None,
                     "embedding":        None,
                     "unresolved":       not cit.found_on_arxiv,
+                    "authors_text":     "",
                 })
                 # Create CITES relationship (citing paper cites source)
                 session.run(MERGE_CITES, {

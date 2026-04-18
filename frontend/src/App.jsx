@@ -10,6 +10,7 @@ export default function App() {
   const [stats, setStats] = useState(null);
   const [searchResults, setSearchResults] = useState([]);
   const [smartSearchResults, setSmartSearchResults] = useState([]);
+  const [cognitiveResults, setCognitiveResults] = useState([]);
   const [rawGraphData, setRawGraphData] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -201,6 +202,36 @@ export default function App() {
     }
   };
 
+  const handleCognitiveSearch = async (paperId) => {
+    if (!paperId) return;
+    setLoading(true);
+    setCognitiveResults([]);
+    try {
+      const res = await fetch(`/api/graph/cognitive-search/${encodeURIComponent(paperId.trim())}`, {
+        method: 'POST'
+      });
+      const data = await res.json();
+      
+      if (data.discoveries && data.discoveries.length > 0) {
+        setCognitiveResults(data.discoveries);
+        // Also render the activation graph
+        if (data.graph) {
+          setRawGraphData(data.graph);
+          const years = data.graph.nodes.map(n => n.year).filter(y => y);
+          if (years.length > 0) {
+            setTimelineYear(Math.max(...years));
+          }
+        }
+      } else {
+        alert(`No cognitive discoveries found for: ${paperId}. Make sure the paper exists in the graph.`);
+      }
+    } catch (err) {
+      alert("Cognitive Search Error: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleExportPNG = () => {
     const canvas = document.querySelector('.vis-network canvas');
     if (!canvas) return;
@@ -328,6 +359,8 @@ export default function App() {
           onFetchToGraph={handleFetchToGraph}
           onUploadPdf={handleUploadPdf}
           onVisualize={handleVisualize}
+          onCognitiveSearch={handleCognitiveSearch}
+          cognitiveResults={cognitiveResults}
         />
         
         <main className="graph-layout">

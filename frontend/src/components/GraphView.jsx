@@ -13,11 +13,23 @@ export default function GraphView({ graphData, onNodeClick, onExpandNode }) {
       let nodeColor = { background: '#1f6feb', border: '#1f6feb' }; // Default / Stub node
       
       const tag = n.personality_tag?.toUpperCase();
-      if (tag === 'PIONEER') nodeColor = { background: '#8957e5', border: '#8957e5' };
-      if (tag === 'OPTIMIZER') nodeColor = { background: '#238636', border: '#238636' };
-      if (tag === 'BRIDGE') nodeColor = { background: '#d29922', border: '#d29922' };
+      const isCognitiveMode = n.activation_energy !== undefined;
 
-      const isRoot = n.depth === 0;
+      if (isCognitiveMode) {
+        // Activation energy heat gradient: cool blue → hot magenta
+        const energy = n.activation_energy || 0;
+        const r = Math.round(58 + energy * 200);
+        const g = Math.round(100 * (1 - energy));
+        const b = Math.round(200 + energy * 55);
+        const color = `rgb(${Math.min(255,r)},${Math.max(0,g)},${Math.min(255,b)})`;
+        nodeColor = { background: color, border: n.is_seed ? '#ffffff' : color };
+      } else {
+        if (tag === 'PIONEER') nodeColor = { background: '#8957e5', border: '#8957e5' };
+        if (tag === 'OPTIMIZER') nodeColor = { background: '#238636', border: '#238636' };
+        if (tag === 'BRIDGE') nodeColor = { background: '#d29922', border: '#d29922' };
+      }
+
+      const isRoot = n.depth === 0 || n.is_seed;
       const isUntagged = !tag;
       const dimmed = activeFilter && (
         (activeFilter === 'UNTAGGED' && !isUntagged) || 
@@ -29,22 +41,45 @@ export default function GraphView({ graphData, onNodeClick, onExpandNode }) {
       return {
         id: n.id || n.paper_id,
         label: (n.label || n.title || 'Unknown').substring(0, 40) + '...',
-        title: `Title: ${n.title}\nYear: ${n.year}\nArXiv: ${n.arxiv_id}\nTag: ${tag || 'None'}`,
+        title: isCognitiveMode
+          ? `Title: ${n.title}\nYear: ${n.year}\nEnergy: ${(n.activation_energy || 0).toFixed(3)}\nSerendipity: ${(n.serendipity_score || 0).toFixed(3)}\nDepth: ${n.depth} hops`
+          : `Title: ${n.title}\nYear: ${n.year}\nArXiv: ${n.arxiv_id}\nTag: ${tag || 'None'}`,
         color: { ...nodeColor, opacity: nodeOpacity },
-        size: isRoot ? 24 : 12,
+        size: isRoot ? 24 : (isCognitiveMode ? 10 + Math.pow(n.activation_energy || 0, 0.5) * 20 : 12),
+        shadow: (isCognitiveMode && (n.activation_energy || 0) > 0.2) ? {
+          enabled: true,
+          color: nodeColor.background,
+          size: 15 * (n.activation_energy || 0.2),
+          x: 0, y: 0
+        } : false,
         font: { 
           color: dimmed ? '#30363d' : '#c9d1d9', 
           size: isRoot ? 14 : 11,
           strokeWidth: isRoot ? 2 : 0,
           strokeColor: '#0e1116'
         },
-        borderWidth: isRoot ? 3 : 1,
+        borderWidth: isRoot ? 3 : (isCognitiveMode && n.activation_energy > 0.4 ? 2 : 1),
         rawData: n
       };
     });
 
     const edges = (graphData.edges || []).map((e) => {
+      const isActivationFlow = e.rel_type === 'activation_flow';
       const isCitation = e.rel_type !== 'similar_to';
+      
+      if (isActivationFlow) {
+        return {
+          from: e.from || e.source,
+          to: e.to || e.target,
+          arrows: 'to',
+          color: { color: '#ff61e6', opacity: 0.9 }, // Hot glow outline
+          width: 2.5,
+          dashes: [4, 4],
+          smooth: { type: 'continuous' },
+          shadow: { enabled: true, color: '#ff61e6', size: 10, x: 0, y: 0 }
+        };
+      }
+
       return {
         from: e.from || e.source,
         to: e.to || e.target,
@@ -90,21 +125,19 @@ export default function GraphView({ graphData, onNodeClick, onExpandNode }) {
       const visNodes = networkRef.current.body.data.nodes;
       
       const updates = [];
-      // Itirate using vis.DataSet forEach
       visNodes.forEach((node) => {
         let fontSize = 11;
-        // Gunakan ukuran default isRoot dari configurasi awal
-        const isRoot = node.size === 24; 
+        const isRoot = node.rawData?.depth === 0 || node.rawData?.is_seed;
         
-        if (scale < 0.6) {
+        // Lowered threshold so labels don't disappear too easily when auto-fitted
+        if (scale < 0.3) {
           fontSize = 0;
-        } else if (scale < 1.0) {
+        } else if (scale < 0.5) {
           fontSize = isRoot ? 14 : 0;
         } else {
           fontSize = isRoot ? 14 : 11;
         }
         
-        // Cek jika ukuran font saat ini berbeda dengan target
         const currentSize = node.font ? node.font.size : 11;
         if (currentSize !== fontSize) {
             updates.push({ id: node.id, font: { ...node.font, size: fontSize } });

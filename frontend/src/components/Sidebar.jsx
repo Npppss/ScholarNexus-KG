@@ -1,8 +1,18 @@
 import { useState } from 'react';
 
-export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisualize, searchResults, onSmartSearch, smartSearchResults }) {
+// Interpolate color from cool blue → hot magenta based on serendipity
+function getSerendipityColor(score, maxScore) {
+  const t = Math.min(1, score / (maxScore || 1));
+  const r = Math.round(58 + t * 152);   // 58 → 210
+  const g = Math.round(166 - t * 100);  // 166 → 66
+  const b = Math.round(255);            // stays purple-ish
+  return `rgb(${r},${g},${b})`;
+}
+
+export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisualize, searchResults, onSmartSearch, smartSearchResults, onCognitiveSearch, cognitiveResults }) {
   const [query, setQuery] = useState('');
   const [smartQuery, setSmartQuery] = useState('');
+  const [cogPaperId, setCogPaperId] = useState('');
   const [arxivId, setArxivId] = useState('');
   const [visualizeId, setVisualizeId] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -90,6 +100,62 @@ export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisua
                   }}
                 >
                   Visualize Lineage ({p.year ?? 'Unknown'})
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* 1c. Cognitive Search (Spreading Activation) */}
+      <div className="sidebar-section">
+        <div className="sidebar-title">🧠 Cognitive Search</div>
+        <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '8px' }}>
+          Simulate brain-like associative thinking. Discovers surprising connections via spreading activation.
+        </div>
+        <div className="form-group">
+          <input 
+            className="input-field"
+            type="text" 
+            placeholder="Paper ID (e.g. arxiv:2401.xxxxx)" 
+            value={cogPaperId} 
+            onChange={(e) => setCogPaperId(e.target.value)} 
+          />
+          <button className="btn btn-primary" onClick={() => onCognitiveSearch(cogPaperId)}>Activate</button>
+        </div>
+        
+        {cognitiveResults && cognitiveResults.length > 0 && (
+          <div style={{ marginTop: '16px' }}>
+            <div className="sidebar-title" style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
+              🔮 Serendipity Discoveries ({cognitiveResults.length})
+            </div>
+            {cognitiveResults.slice(0, 8).map((p, i) => (
+              <div key={p.paper_id} className="result-card" style={{ borderLeft: `3px solid ${getSerendipityColor(p.serendipity_score, cognitiveResults[0]?.serendipity_score || 1)}` }}>
+                <div className="result-card-title">{p.title || 'Unknown'}</div>
+                <div className="result-card-meta">
+                  Depth: {p.depth} hops | Energy: {p.activation_energy?.toFixed(3)}
+                </div>
+                <div style={{ 
+                  fontSize: '11px', color: '#8b949e', marginTop: '6px', marginBottom: '8px', 
+                  fontStyle: 'italic', background: '#161b22', padding: '6px', borderRadius: '4px', 
+                  borderLeft: '2px solid #d2a8ff' 
+                }}>
+                  {p.serendipity_score > 0.3 
+                    ? `🌟 High serendipity! Unexpected connection at depth ${p.depth}`
+                    : p.depth <= 1 
+                      ? `🔗 Direct neighbor — strong association`
+                      : `🧩 Distant connection (${p.depth} hops) — creative link`}
+                  {p.personality_tag && ` | 🏷 ${p.personality_tag}`}
+                </div>
+                <button 
+                  className="btn" 
+                  style={{ width: '100%', padding: '4px', fontSize: '11px', marginTop: '4px' }}
+                  onClick={() => {
+                    setVisualizeId(p.arxiv_id || p.paper_id);
+                    onVisualize(p.arxiv_id || p.paper_id);
+                  }}
+                >
+                  Explore Lineage ({p.year ?? '?'})
                 </button>
               </div>
             ))}
