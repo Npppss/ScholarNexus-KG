@@ -338,12 +338,14 @@ class GraphService:
             # ── 1. Selalu fetch root paper ─────────────────────────────────
             root_result = session.run(
                 """
-                MATCH (p:Paper {arxiv_id: $arxiv_id})
+                MATCH (p:Paper)
+                WHERE p.arxiv_id = $arxiv_id OR p.paper_id = $arxiv_id OR p.paper_id = 'arxiv:' + $arxiv_id
                 RETURN p {
                     .paper_id, .title, .year, .arxiv_id,
                     .personality_tag, .confidence_score,
                     .primary_category
                 } AS node
+                LIMIT 1
                 """,
                 arxiv_id=arxiv_id
             ).single()
@@ -359,9 +361,10 @@ class GraphService:
             # ── 2. Fetch related nodes via CITES ──────────────────────────
             if direction in ("ancestors", "both"):
                 query = f"""
-                    MATCH path = (root:Paper {{arxiv_id: $arxiv_id}})
+                    MATCH path = (root:Paper)
                                  -[:CITES*1..{depth}]->(ancestor:Paper)
-                    WHERE ancestor.unresolved = false
+                    WHERE (root.arxiv_id = $arxiv_id OR root.paper_id = $arxiv_id OR root.paper_id = 'arxiv:' + $arxiv_id) 
+                      AND ancestor.unresolved = false
                     WITH ancestor, length(path) AS d
                     RETURN ancestor {{
                         .paper_id, .title, .year, .arxiv_id,
@@ -382,8 +385,9 @@ class GraphService:
             if direction in ("descendants", "both"):
                 query = f"""
                     MATCH path = (child:Paper)
-                                 -[:CITES*1..{depth}]->(root:Paper {{arxiv_id: $arxiv_id}})
-                    WHERE child.unresolved = false
+                                 -[:CITES*1..{depth}]->(root:Paper)
+                    WHERE (root.arxiv_id = $arxiv_id OR root.paper_id = $arxiv_id OR root.paper_id = 'arxiv:' + $arxiv_id) 
+                      AND child.unresolved = false
                     AND child.paper_id <> root.paper_id
                     WITH child, length(path) AS d
                     RETURN child {{
@@ -562,6 +566,66 @@ class GraphService:
         """
         with driver.session() as session:
             return [dict(r) for r in session.run(query)]
+
+    # ── GraphRAG Smart Search ─────────────────────────────────────────────
+    def smart_graphrag_search(
+        self,
+        query_embedding: list[float],
+        top_k: int = 5,
+        limit: int = 10,
+    ) -> list[dict]:
+        """
+        AI-Powered Paper Discovery Endpoint (GraphRAG).
+        Combines Neo4j Vector Search + Graph Neighbor Expansion + Re-ranking.
+        """
+        query = """
+        // 1. Vector Search for Core Candidates
+        CALL db.index.vector.queryNodes('paper_embedding_index', $top_k, $embedding)
+        YIELD node AS paper, score AS similarity_score
+        WITH paper, similarity_score
+
+        // 2. Expand Neighbors 0 to 2 hops away (0 means including the paper itself)
+        OPTIONAL MATCH (paper)-[:CITES*0..2]-(neighbor:Paper)
+        // ensure we only include actual papers, avoiding unresolved stubs
+        WHERE neighbor IS NOT NULL AND neighbor.unresolved = false
+
+        // 3. Unify Candidate Selection
+        WITH neighbor AS candidate, 
+             max(similarity_score) AS context_sim, 
+             max(CASE WHEN paper = neighbor THEN similarity_score ELSE 0 END) AS direct_sim
+
+        // 4. Citation Count for Prominence
+        OPTIONAL MATCH ()-[r:CITES]->(candidate)
+        WITH candidate, context_sim, direct_sim, count(r) AS citation_count
+
+        // 5. Final Re-ranking calculation
+        WITH candidate, context_sim, direct_sim, citation_count, coalesce(candidate.year, 2010) AS c_year
+
+        WITH candidate, direct_sim, context_sim, citation_count,
+             (CASE WHEN direct_sim > 0 THEN direct_sim * 0.6 ELSE context_sim * 0.3 END) + 
+             (citation_count * 0.05) + 
+             ((c_year - 2000) * 0.01) AS final_score
+
+        RETURN 
+          candidate.paper_id AS paper_id,
+          candidate.title AS title,
+          candidate.year AS year,
+          candidate.arxiv_id AS arxiv_id,
+          candidate.personality_tag AS personality,
+          direct_sim AS vector_similarity,
+          citation_count,
+          final_score
+        ORDER BY final_score DESC
+        LIMIT $limit
+        """
+        with driver.session() as session:
+            result = session.run(
+                query,
+                embedding=query_embedding,
+                top_k=top_k,
+                limit=limit
+            )
+            return [dict(r) for r in result]
 
 
 # Singleton

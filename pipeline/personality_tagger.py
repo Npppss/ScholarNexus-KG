@@ -134,26 +134,49 @@ def run_extraction_pipeline(paper) -> dict:
     from pipeline.pdf_extractor import ParsedPaper
 
     # ── Call 1: Metadata ──────────────────────────────
-    meta_prompt = METADATA_PROMPT.format(
-        title        = paper.title or "Unknown",
-        abstract     = paper.sections.get("abstract", "")[:3000],
-        introduction = paper.sections.get("introduction", "")[:2000],
-        methods      = paper.sections.get("methods", "")[:2000],
-    )
-    meta_response = MODEL.generate_content(meta_prompt)
-    metadata = _safe_parse_json(meta_response.text)
+    try:
+        meta_prompt = METADATA_PROMPT.format(
+            title        = paper.title or "Unknown",
+            abstract     = paper.sections.get("abstract", "")[:3000],
+            introduction = paper.sections.get("introduction", "")[:2000],
+            methods      = paper.sections.get("methods", "")[:2000],
+        )
+        meta_response = MODEL.generate_content(meta_prompt)
+        metadata = _safe_parse_json(meta_response.text)
+    except Exception as e:
+        logger.error(f"Metadata extraction failed: {e}")
+        metadata = {
+            "problem_statement": "Metadata extraction failed due to API error.",
+            "key_contribution": str(e),
+            "methods_proposed": [],
+            "topics": []
+        }
 
     # ── Call 2: Personality ───────────────────────────
-    personality_prompt = PERSONALITY_PROMPT.format(
-        title              = paper.title or "Unknown",
-        abstract           = paper.sections.get("abstract", "")[:2000],
-        problem_statement  = metadata.get("problem_statement", ""),
-        key_contribution   = metadata.get("key_contribution", ""),
-        methods_proposed   = ", ".join(metadata.get("methods_proposed", [])),
-        topics             = ", ".join(metadata.get("topics", [])),
-    )
-    personality_response = MODEL.generate_content(personality_prompt)
-    personality = _safe_parse_json(personality_response.text)
+    try:
+        personality_prompt = PERSONALITY_PROMPT.format(
+            title              = paper.title or "Unknown",
+            abstract           = paper.sections.get("abstract", "")[:2000],
+            problem_statement  = metadata.get("problem_statement", ""),
+            key_contribution   = metadata.get("key_contribution", ""),
+            methods_proposed   = ", ".join(metadata.get("methods_proposed", [])),
+            topics             = ", ".join(metadata.get("topics", [])),
+        )
+        personality_response = MODEL.generate_content(personality_prompt)
+        personality = _safe_parse_json(personality_response.text)
+        
+        valid_tags = {"PIONEER", "OPTIMIZER", "BRIDGE"}
+        tag = personality.get("personality_tag", "")
+        if tag and isinstance(tag, str) and tag.upper() not in valid_tags:
+            personality["personality_tag"] = None
+            
+    except Exception as e:
+        logger.error(f"Personality extraction failed: {e}")
+        personality = {
+            "personality_tag": None,
+            "confidence_score": 0.0,
+            "reasoning": f"API error: {str(e)}"
+        }
 
     return {
         "title":            paper.title,

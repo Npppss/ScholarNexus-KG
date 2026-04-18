@@ -215,10 +215,12 @@ async def _expand_references_background(arxiv_id: str, depth: int):
     try:
         # 1. Fetch dari Semantic Scholar API
         result = semantic_scholar_service.get_references_and_citations(arxiv_id)
-        references = result["references"]
-        citations  = result["citations"]
+        
+        # Smart expansion: hanya expand paper yang punya ArXiv ID
+        references = [r for r in result["references"] if r.arxiv_id]
+        citations  = [c for c in result["citations"] if c.arxiv_id]
 
-        log.info(f"   Found {len(references)} references, {len(citations)} citations")
+        log.info(f"   Found {len(references)} ArXiv references, {len(citations)} ArXiv citations")
 
         # 2. paper_id dari paper saat ini
         source_paper_id = _make_paper_id(arxiv_id=arxiv_id)
@@ -288,6 +290,15 @@ async def _expand_references_background(arxiv_id: str, depth: int):
 
         total = len(references) + len(citations)
         log.info(f"✅ Expanded {arxiv_id}: {total} related papers added to graph")
+
+        # Level 2 expansion: untuk top-5 most-cited references, fetch citations mereka juga
+        if depth > 1:
+            import asyncio
+            # Sort references by citation count, take top 5
+            top_refs = sorted(references, key=lambda x: x.citation_count, reverse=True)[:5]
+            for ref in top_refs:
+                log.info(f"🚀 Batch processing: recursive expansion for top-cited ref {ref.arxiv_id}")
+                asyncio.create_task(_expand_references_background(ref.arxiv_id, depth=depth-1))
 
     except Exception as e:
         log.error(f"❌ Failed to expand references for {arxiv_id}: {e}")    

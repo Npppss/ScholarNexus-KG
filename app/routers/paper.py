@@ -57,5 +57,9 @@ async def upload_paper(file: UploadFile = File(...)):
             "graph_nodes_created": result["nodes_created"],
         })
 
+    except Exception as e:
+        raise HTTPException(500, detail=str(e))
+
     finally:
-        os.unlink(tmp_path)  # Selalu hapus temp file
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)  # Selalu hapus temp file

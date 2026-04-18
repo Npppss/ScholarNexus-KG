@@ -9,6 +9,7 @@ export default function App() {
   const [health, setHealth] = useState(null);
   const [stats, setStats] = useState(null);
   const [searchResults, setSearchResults] = useState([]);
+  const [smartSearchResults, setSmartSearchResults] = useState([]);
   const [rawGraphData, setRawGraphData] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -63,6 +64,24 @@ export default function App() {
     }
   };
 
+  const handleSmartSearch = async (query) => {
+    if (!query) return;
+    setLoading(true);
+    try {
+      const res = await fetch('/api/search/smart', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ query, top_k: 5, limit: 5 })
+      });
+      const data = await res.json();
+      setSmartSearchResults(data.results || []);
+    } catch (err) {
+      alert("Smart Search Error: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleFetchToGraph = async (arxivId) => {
     if (!arxivId) return;
     setLoading(true);
@@ -74,6 +93,35 @@ export default function App() {
       });
       await res.json();
       fetchStats();
+    } catch (err) {
+      alert("Error: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleUploadPdf = async (file) => {
+    if (!file) return;
+    setLoading(true);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      
+      const res = await fetch('/api/papers/upload', {
+        method: 'POST',
+        // Do not set Content-Type header manually when using FormData
+        body: formData
+      });
+      
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.message || "Upload failed");
+      }
+      alert(`Success! Node created: ${data.paper_id} (Personality: ${data.personality_tag})`);
+      fetchStats();
+      if (data.paper_id) {
+         handleVisualize(data.paper_id);
+      }
     } catch (err) {
       alert("Error: " + err.message);
     } finally {
@@ -146,7 +194,10 @@ export default function App() {
         <Sidebar 
           onSearch={handleSearch} 
           searchResults={searchResults}
+          onSmartSearch={handleSmartSearch}
+          smartSearchResults={smartSearchResults}
           onFetchToGraph={handleFetchToGraph}
+          onUploadPdf={handleUploadPdf}
           onVisualize={handleVisualize}
         />
         

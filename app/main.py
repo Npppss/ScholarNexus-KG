@@ -7,7 +7,7 @@ from neo4j import GraphDatabase
 import logging
 
 from app.config.settings import settings
-from app.routers import paper, arxiv, graph
+from app.routers import paper, arxiv, graph, search
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ allow_origins=[
 app.include_router(paper.router)
 app.include_router(arxiv.router)
 app.include_router(graph.router)
+app.include_router(search.router)
 
 
 # ── Health check endpoint (dipakai Docker healthcheck) ────────────────────

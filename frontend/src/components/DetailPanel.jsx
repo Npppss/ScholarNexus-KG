@@ -39,6 +39,17 @@ export default function DetailPanel({ node, onClose, onExpand }) {
           <div className="detail-value">{node.authors ? node.authors.join(', ') : 'N/A'}</div>
         </div>
 
+        <div className="detail-section">
+          <div className="detail-label">Source Link</div>
+          <div className="detail-value">
+            {node.arxiv_id ? (
+              <a href={`https://arxiv.org/abs/${node.arxiv_id}`} target="_blank" rel="noopener noreferrer" style={{color: '#58a6ff', textDecoration: 'underline'}}>
+                View on ArXiv
+              </a>
+            ) : 'N/A'}
+          </div>
+        </div>
+
         {node.reasoning && (
           <div className="detail-section" style={{ marginTop: '24px' }}>
             <div className="detail-label">Classification Reasoning</div>
