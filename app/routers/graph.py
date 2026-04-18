@@ -1,5 +1,6 @@
 # app/routers/graph.py
 from fastapi import APIRouter, Query
+from fastapi.responses import PlainTextResponse
 from services.graph_service  import graph_service
 from services.vector_service import generate_embedding
 
@@ -55,3 +56,31 @@ async def graph_stats():
         "graph":        graph_service.get_graph_stats(),
         "personality":  graph_service.get_personality_distribution(),
     }
+
+@router.get("/bibtex/{arxiv_id}", response_class=PlainTextResponse)
+async def export_bibtex(arxiv_id: str, depth: int = Query(3, ge=1, le=6)):
+    """Export the lineage graph of a paper into BibTeX format."""
+    lineage = graph_service.get_research_lineage(arxiv_id, "both", depth)
+    nodes = lineage.get("nodes", [])
+    
+    if not nodes:
+        return ""
+        
+    bibtex_entries = []
+    for n in nodes:
+        authors_str = " and ".join(n.get("authors", [])) if n.get("authors") else "Unknown Author"
+        title = n.get("title", "Unknown Title")
+        year = n.get("year", "Unknown Year")
+        pid = n.get("arxiv_id") or n.get("paper_id", "id").replace(":", "_")
+        
+        entry = (
+            f"@article{{{pid},\n"
+            f"  title={{{title}}},\n"
+            f"  author={{{authors_str}}},\n"
+            f"  year={{{year}}},\n"
+            f"  journal={{arXiv preprint arXiv:{n.get('arxiv_id', '')}}},\n"
+            f"}}"
+        )
+        bibtex_entries.append(entry)
+        
+    return "\n\n".join(bibtex_entries)

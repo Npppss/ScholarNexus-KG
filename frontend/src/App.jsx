@@ -39,6 +39,14 @@ export default function App() {
   useEffect(() => {
     fetchHealth();
     fetchStats();
+    
+    // Check for viz_id in URL for Share Links
+    const urlParams = new URLSearchParams(window.location.search);
+    const vizId = urlParams.get('viz_id');
+    if (vizId) {
+      handleVisualize(vizId);
+    }
+
     const interval = setInterval(() => {
       fetchHealth();
       fetchStats();
@@ -164,6 +172,98 @@ export default function App() {
     setSelectedNode(nodeData);
   }, []);
 
+  const handleExportPNG = () => {
+    const canvas = document.querySelector('.vis-network canvas');
+    if (!canvas) return;
+    
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = canvas.width;
+    tempCanvas.height = canvas.height;
+    const ctx = tempCanvas.getContext('2d');
+    
+    // Fill background with app bg color so it's not transparent
+    ctx.fillStyle = '#0e1116'; 
+    ctx.fillRect(0, 0, tempCanvas.width, tempCanvas.height);
+    ctx.drawImage(canvas, 0, 0);
+    
+    const url = tempCanvas.toDataURL('image/png');
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `graph-${rawGraphData?.root || 'export'}.png`;
+    a.click();
+  };
+
+  const handleExportBibtex = async () => {
+    if (!rawGraphData?.root) return;
+    try {
+      const res = await fetch(`/api/graph/bibtex/${rawGraphData.root}`);
+      const text = await res.text();
+      const blob = new Blob([text], { type: 'text/plain' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `references-${rawGraphData.root}.bib`;
+      a.click();
+    } catch (err) {
+      alert("Error exporting BibTeX: " + err.message);
+    }
+  };
+
+  const handleShareLink = () => {
+    if (!rawGraphData?.root) return;
+    const shareUrl = `${window.location.origin}${window.location.pathname}?viz_id=${rawGraphData.root}`;
+    navigator.clipboard.writeText(shareUrl).then(() => {
+      alert("Share Link copied to clipboard!");
+    });
+  };
+
+  const handleGeneratePDF = () => {
+    if (!filteredGraphData) return;
+    const nodes = filteredGraphData.nodes;
+    let html = `<html><head><title>Research Lineage Report</title>
+      <style>
+        body { font-family: 'Inter', sans-serif; padding: 40px; color: #24292f; background: #fff; }
+        h1 { color: #0969da; border-bottom: 2px solid #eaecef; padding-bottom: 10px; }
+        h2 { margin-top: 30px; font-size: 20px; }
+        .paper { margin-bottom: 15px; padding: 15px; border: 1px solid #d0d7de; border-radius: 6px; }
+        .tag { display: inline-block; padding: 4px 8px; border-radius: 12px; font-size: 11px; color: #fff; font-weight: bold; margin-bottom: 8px;}
+        .PIONEER { background-color: #8957e5; }
+        .OPTIMIZER { background-color: #238636; }
+        .BRIDGE { background-color: #d29922; }
+        .UNTAGGED { background-color: #57606a; }
+      </style>
+    </head><body>`;
+    
+    html += `<h1>Research Lineage Report: ${rawGraphData.root}</h1>`;
+    html += `<p>Total Papers in Lineage: <strong>${nodes.length}</strong></p>`;
+    
+    const byTag = nodes.reduce((acc, n) => {
+      const tag = n.personality_tag || 'UNTAGGED';
+      if (!acc[tag]) acc[tag] = [];
+      acc[tag].push(n);
+      return acc;
+    }, {});
+    
+    for (const [tag, group] of Object.entries(byTag).sort()) {
+      html += `<h2>${tag} Papers (${group.length})</h2>`;
+      group.forEach(n => {
+        html += `<div class="paper">
+          <div class="tag ${tag}">${tag}</div>
+          <div style="font-size: 16px; font-weight: 600;">${n.title || 'Unknown Title'}</div>
+          <div style="font-size: 13px; color: #57606a; margin-top: 4px;">ArXiv ID: ${n.arxiv_id || 'N/A'} | Year: ${n.year || 'N/A'}</div>
+          ${n.reasoning ? `<div style="font-size: 13px; border-left: 3px solid #d0d7de; padding-left: 10px; margin-top: 8px;"><em>${n.reasoning}</em></div>` : ''}
+        </div>`;
+      });
+    }
+    html += `</body></html>`;
+    
+    const printWindow = window.open('', '_blank');
+    printWindow.document.write(html);
+    printWindow.document.close();
+    printWindow.focus();
+    setTimeout(() => { printWindow.print(); }, 800);
+  };
+
   const { minYear, maxYear, filteredGraphData } = useMemo(() => {
     if (!rawGraphData || !rawGraphData.nodes) {
       return { minYear: 0, maxYear: 0, filteredGraphData: null };
@@ -202,6 +302,15 @@ export default function App() {
         />
         
         <main className="graph-layout">
+          {rawGraphData && (
+            <div className="actions-toolbar" style={{ position: 'absolute', top: 16, right: 16, zIndex: 10, display: 'flex', gap: '8px', background: 'var(--bg-surface)', padding: '6px', borderRadius: '8px', border: '1px solid var(--border-color)', boxShadow: '0 4px 12px rgba(0,0,0,0.2)' }}>
+              <button className="btn" style={{ fontSize: '11px', padding: '6px 12px' }} onClick={handleExportPNG}>📸 PNG</button>
+              <button className="btn" style={{ fontSize: '11px', padding: '6px 12px' }} onClick={handleExportBibtex}>📚 BibTeX</button>
+              <button className="btn" style={{ fontSize: '11px', padding: '6px 12px' }} onClick={handleGeneratePDF}>📄 PDF Report</button>
+              <button className="btn btn-primary" style={{ fontSize: '11px', padding: '6px 12px' }} onClick={handleShareLink}>🔗 Share Link</button>
+            </div>
+          )}
+
           <GraphView 
             graphData={filteredGraphData} 
             onNodeClick={handleNodeClick} 

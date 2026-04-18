@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 S2_BASE = "https://api.semanticscholar.org/graph/v1"
 
 # Fields we request for each referenced/citing paper
-PAPER_FIELDS = "externalIds,title,year,authors,citationCount"
+PAPER_FIELDS = "externalIds,title,year,authors,citationCount,contexts,intents"
 
 
 @dataclass
@@ -126,6 +126,10 @@ class SemanticScholarService:
         ext_ids  = data.get("externalIds") or {}
         authors  = [a.get("name", "") for a in (data.get("authors") or [])]
         arxiv_id = ext_ids.get("ArXiv")
+        
+        # Ambil context sitasi yang sebenarnya jika tersedia dari Semantic Scholar
+        contexts = data.get("contexts", [])
+        actual_context = contexts[0] if contexts else data.get("title", "")
 
         return RelatedPaper(
             title          = data.get("title", "Unknown"),
@@ -135,7 +139,7 @@ class SemanticScholarService:
             authors        = authors[:5],  # limit to first 5
             citation_count = data.get("citationCount", 0),
             s2_paper_id    = data.get("paperId"),
-            raw_text       = data.get("title", ""),
+            raw_text       = actual_context,
             found_on_arxiv = bool(arxiv_id),
         )
 

@@ -31,11 +31,15 @@ export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisua
                 <div className="result-card-title">{p.title}</div>
                 <div className="result-card-meta">ID: {p.arxiv_id} | Year: {p.year}</div>
                 <button 
-                  className="btn" 
-                  style={{ width: '100%', padding: '4px', fontSize: '11px' }}
-                  onClick={() => setArxivId(p.arxiv_id)}
+                  className="btn btn-primary" 
+                  style={{ width: '100%', padding: '4px', fontSize: '11px', marginTop: '6px' }}
+                  onClick={() => {
+                    setArxivId(p.arxiv_id);
+                    setVisualizeId(p.arxiv_id);
+                    onFetchToGraph(p.arxiv_id); // Langsung masukkan ke Graph
+                  }}
                 >
-                  Select ID
+                  Ingest & Visualize
                 </button>
               </div>
             ))}
