@@ -28,6 +28,7 @@ SET
   p.primary_category = $primary_category,
   p.embedding        = $embedding,
   p.unresolved       = $unresolved,
+  p.authors_text     = $authors_text,
   p.updated_at       = datetime()
 RETURN p.paper_id AS paper_id
 """
@@ -162,6 +163,12 @@ def upsert_paper_to_graph(
 
     stats = {"nodes_created": 0, "rels_created": 0, "paper_id": paper_id}
 
+    # Convert authors to text for fast frontend retrieval
+    authors_list = [a.get("name", "") if isinstance(a, dict) else a for a in meta.get("authors", [])]
+    if not authors_list and arxiv_paper and arxiv_paper.authors:
+        authors_list = arxiv_paper.authors
+    authors_text = ", ".join(filter(None, authors_list))
+
     with driver.session() as session:
 
         # ── 1. Upsert :Paper node ─────────────────────────────────────────
@@ -179,6 +186,7 @@ def upsert_paper_to_graph(
             "primary_category": arxiv_paper.primary_cat if arxiv_paper else None,
             "embedding":        embedding,
             "unresolved":       False,
+            "authors_text":     authors_text
         })
         stats["nodes_created"] += 1
 
@@ -343,7 +351,7 @@ class GraphService:
                 RETURN p {
                     .paper_id, .title, .year, .arxiv_id,
                     .personality_tag, .confidence_score,
-                    .primary_category
+                    .primary_category, .authors_text
                 } AS node
                 LIMIT 1
                 """,
@@ -356,6 +364,7 @@ class GraphService:
                 root_node["depth"] = 0
                 root_node["id"] = root_node["paper_id"]
                 root_node["label"] = root_node.get("title", arxiv_id)[:50]
+                root_node["authors"] = [a.strip() for a in root_node.get("authors_text", "").split(",")] if root_node.get("authors_text") else []
                 nodes.append(root_node)
 
             # ── 2. Fetch related nodes via CITES ──────────────────────────
@@ -369,7 +378,7 @@ class GraphService:
                     RETURN ancestor {{
                         .paper_id, .title, .year, .arxiv_id,
                         .personality_tag, .confidence_score,
-                        .primary_category, depth: d
+                        .primary_category, .authors_text, depth: d
                     }} AS node, d AS depth
                     ORDER BY d ASC, ancestor.year DESC
                     LIMIT 60
@@ -379,6 +388,7 @@ class GraphService:
                     n = dict(r["node"])
                     n["id"] = n["paper_id"]
                     n["label"] = n.get("title", "?")[:50]
+                    n["authors"] = [a.strip() for a in n.get("authors_text", "").split(",")] if n.get("authors_text") else []
                     if not any(existing["paper_id"] == n["paper_id"] for existing in nodes):
                         nodes.append(n)
 
@@ -393,7 +403,7 @@ class GraphService:
                     RETURN child {{
                         .paper_id, .title, .year, .arxiv_id,
                         .personality_tag, .confidence_score,
-                        .primary_category, depth: d
+                        .primary_category, .authors_text, depth: d
                     }} AS node, d AS depth
                     ORDER BY d ASC, child.year DESC
                     LIMIT 40
@@ -403,6 +413,7 @@ class GraphService:
                     n = dict(r["node"])
                     n["id"] = n["paper_id"]
                     n["label"] = n.get("title", "?")[:50]
+                    n["authors"] = [a.strip() for a in n.get("authors_text", "").split(",")] if n.get("authors_text") else []
                     if not any(existing["paper_id"] == n["paper_id"] for existing in nodes):
                         nodes.append(n)
 
@@ -416,8 +427,9 @@ class GraphService:
             vis_edges.append({
                 "from": e["source"],
                 "to":   e["target"],
-                "label": "CITES",
+                "label": e.get("rel_type", "cites").upper(),
                 "arrows": "to",
+                "rel_type": e.get("rel_type", "cites"),
             })
 
         return {
@@ -429,15 +441,17 @@ class GraphService:
         }
 
     def _get_edges_between(self, paper_ids: list[str]) -> list[dict]:
-        """Ambil semua CITES edges di antara sekumpulan paper_ids."""
+        """Ambil semua CITES dan SIMILAR_TO edges di antara sekumpulan paper_ids."""
         query = """
             MATCH (src:Paper)-[r:CITES]->(tgt:Paper)
             WHERE src.paper_id IN $ids AND tgt.paper_id IN $ids
-            RETURN
-              src.paper_id       AS source,
-              tgt.paper_id       AS target,
-              r.match_confidence AS confidence,
-              r.resolved_via     AS resolved_via
+            RETURN src.paper_id AS source, tgt.paper_id AS target, 
+                   r.match_confidence AS confidence, 'cites' AS rel_type
+            UNION
+            MATCH (src:Paper)-[r:SIMILAR_TO]->(tgt:Paper)
+            WHERE src.paper_id IN $ids AND tgt.paper_id IN $ids
+            RETURN src.paper_id AS source, tgt.paper_id AS target, 
+                   r.similarity_score AS confidence, 'similar_to' AS rel_type
         """
         with driver.session() as session:
             result = session.run(query, ids=paper_ids)
@@ -585,23 +599,24 @@ class GraphService:
         WITH paper, similarity_score
 
         // 2. Expand Neighbors 0 to 2 hops away (0 means including the paper itself)
-        OPTIONAL MATCH (paper)-[:CITES*0..2]-(neighbor:Paper)
+        OPTIONAL MATCH path = (paper)-[:CITES*0..2]-(neighbor:Paper)
         // ensure we only include actual papers, avoiding unresolved stubs
         WHERE neighbor IS NOT NULL AND neighbor.unresolved = false
 
         // 3. Unify Candidate Selection
         WITH neighbor AS candidate, 
              max(similarity_score) AS context_sim, 
-             max(CASE WHEN paper = neighbor THEN similarity_score ELSE 0 END) AS direct_sim
+             max(CASE WHEN paper = neighbor THEN similarity_score ELSE 0 END) AS direct_sim,
+             min(length(path)) AS hop_distance
 
         // 4. Citation Count for Prominence
         OPTIONAL MATCH ()-[r:CITES]->(candidate)
-        WITH candidate, context_sim, direct_sim, count(r) AS citation_count
+        WITH candidate, context_sim, direct_sim, hop_distance, count(r) AS citation_count
 
         // 5. Final Re-ranking calculation
-        WITH candidate, context_sim, direct_sim, citation_count, coalesce(candidate.year, 2010) AS c_year
+        WITH candidate, context_sim, direct_sim, hop_distance, citation_count, coalesce(candidate.year, 2010) AS c_year
 
-        WITH candidate, direct_sim, context_sim, citation_count,
+        WITH candidate, direct_sim, context_sim, hop_distance, citation_count,
              (CASE WHEN direct_sim > 0 THEN direct_sim * 0.6 ELSE context_sim * 0.3 END) + 
              (citation_count * 0.05) + 
              ((c_year - 2000) * 0.01) AS final_score
@@ -613,6 +628,7 @@ class GraphService:
           candidate.arxiv_id AS arxiv_id,
           candidate.personality_tag AS personality,
           direct_sim AS vector_similarity,
+          hop_distance,
           citation_count,
           final_score
         ORDER BY final_score DESC

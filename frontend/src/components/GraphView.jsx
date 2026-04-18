@@ -1,9 +1,10 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Network } from 'vis-network';
 
-export default function GraphView({ graphData, onNodeClick }) {
+export default function GraphView({ graphData, onNodeClick, onExpandNode }) {
   const containerRef = useRef(null);
   const networkRef = useRef(null);
+  const [activeFilter, setActiveFilter] = useState(null);
 
   useEffect(() => {
     if (!containerRef.current || !graphData || !graphData.nodes) return;
@@ -17,15 +18,22 @@ export default function GraphView({ graphData, onNodeClick }) {
       if (tag === 'BRIDGE') nodeColor = { background: '#d29922', border: '#d29922' };
 
       const isRoot = n.depth === 0;
-
+      const isUntagged = !tag;
+      const dimmed = activeFilter && (
+        (activeFilter === 'UNTAGGED' && !isUntagged) || 
+        (activeFilter !== 'UNTAGGED' && tag !== activeFilter)
+      ) && !isRoot;
+      
+      const nodeOpacity = dimmed ? 0.15 : 1.0;
+      
       return {
         id: n.id || n.paper_id,
         label: (n.label || n.title || 'Unknown').substring(0, 40) + '...',
         title: `Title: ${n.title}\nYear: ${n.year}\nArXiv: ${n.arxiv_id}\nTag: ${tag || 'None'}`,
-        color: nodeColor,
+        color: { ...nodeColor, opacity: nodeOpacity },
         size: isRoot ? 24 : 12,
         font: { 
-          color: '#c9d1d9', 
+          color: dimmed ? '#30363d' : '#c9d1d9', 
           size: isRoot ? 14 : 11,
           strokeWidth: isRoot ? 2 : 0,
           strokeColor: '#0e1116'
@@ -35,15 +43,22 @@ export default function GraphView({ graphData, onNodeClick }) {
       };
     });
 
-    const edges = (graphData.edges || []).map((e) => ({
-      from: e.from || e.source,
-      to: e.to || e.target,
-      arrows: 'to',
-      color: { color: '#30363d', opacity: 0.8 },
-      width: 1,
-      smooth: { type: 'continuous' },
-      hoverWidth: 1.5
-    }));
+    const edges = (graphData.edges || []).map((e) => {
+      const isCitation = e.rel_type !== 'similar_to';
+      return {
+        from: e.from || e.source,
+        to: e.to || e.target,
+        arrows: 'to',
+        color: { 
+          color: isCitation ? '#58a6ff' : '#f0883e',
+          opacity: 0.7 
+        },
+        width: isCitation ? 1.5 : 1,
+        dashes: isCitation ? false : [5, 5],
+        smooth: { type: 'continuous' },
+        hoverWidth: 1.5
+      };
+    });
 
     const data = { nodes, edges };
     const options = {
@@ -52,9 +67,13 @@ export default function GraphView({ graphData, onNodeClick }) {
       },
       physics: {
         barnesHut: {
-          gravitationalConstant: -1800,
-          springLength: 120,
-          springConstant: 0.04
+          gravitationalConstant: -3500,
+          springLength: 200,
+          springConstant: 0.02,
+          damping: 0.12
+        },
+        stabilization: {
+          iterations: 200
         }
       },
       interaction: {
@@ -64,6 +83,49 @@ export default function GraphView({ graphData, onNodeClick }) {
     };
 
     networkRef.current = new Network(containerRef.current, data, options);
+
+    // AI Adaptive Label Visibility
+    networkRef.current.on('zoom', () => {
+      const scale = networkRef.current.getScale();
+      const visNodes = networkRef.current.body.data.nodes;
+      
+      const updates = [];
+      // Itirate using vis.DataSet forEach
+      visNodes.forEach((node) => {
+        let fontSize = 11;
+        // Gunakan ukuran default isRoot dari configurasi awal
+        const isRoot = node.size === 24; 
+        
+        if (scale < 0.6) {
+          fontSize = 0;
+        } else if (scale < 1.0) {
+          fontSize = isRoot ? 14 : 0;
+        } else {
+          fontSize = isRoot ? 14 : 11;
+        }
+        
+        // Cek jika ukuran font saat ini berbeda dengan target
+        const currentSize = node.font ? node.font.size : 11;
+        if (currentSize !== fontSize) {
+            updates.push({ id: node.id, font: { ...node.font, size: fontSize } });
+        }
+      });
+      
+      if (updates.length > 0) {
+          visNodes.update(updates);
+      }
+    });
+
+    networkRef.current.on('oncontext', (params) => {
+      params.event.preventDefault();
+      if (params.nodes.length > 0 && onExpandNode) {
+        const nodeId = params.nodes[0];
+        const clickedNode = data.nodes.find(n => n.id === nodeId);
+        if (clickedNode && clickedNode.rawData && clickedNode.rawData.arxiv_id) {
+          onExpandNode(clickedNode.rawData.arxiv_id);
+        }
+      }
+    });
 
     networkRef.current.on('click', (params) => {
       if (params.nodes.length > 0 && onNodeClick) {
@@ -83,7 +145,7 @@ export default function GraphView({ graphData, onNodeClick }) {
         networkRef.current = null;
       }
     };
-  }, [graphData, onNodeClick]);
+  }, [graphData, onNodeClick, activeFilter]);
 
   return (
     <div className="graph-layout" style={{ flex: 1, position: 'relative', width: '100%', height: '100%' }}>
@@ -96,20 +158,36 @@ export default function GraphView({ graphData, onNodeClick }) {
       )}
 
       {graphData && graphData.nodes && graphData.nodes.length > 0 && (
-        <div className="graph-legend">
-          <div className="legend-row">
+        <div className="graph-legend" style={{ pointerEvents: 'auto' }}>
+          <div 
+            className="legend-row" 
+            onClick={() => setActiveFilter(activeFilter === 'PIONEER' ? null : 'PIONEER')}
+            style={{ cursor: 'pointer', opacity: activeFilter && activeFilter !== 'PIONEER' ? 0.4 : 1, transition: 'opacity 0.2s' }}
+          >
             <div className="legend-dot" style={{ backgroundColor: 'var(--pioneer-color)' }}></div>
             Pioneer (New Paradigm)
           </div>
-          <div className="legend-row">
+          <div 
+            className="legend-row" 
+            onClick={() => setActiveFilter(activeFilter === 'OPTIMIZER' ? null : 'OPTIMIZER')}
+            style={{ cursor: 'pointer', opacity: activeFilter && activeFilter !== 'OPTIMIZER' ? 0.4 : 1, transition: 'opacity 0.2s' }}
+          >
             <div className="legend-dot" style={{ backgroundColor: 'var(--optimizer-color)' }}></div>
             Optimizer (Improvement)
           </div>
-          <div className="legend-row">
+          <div 
+            className="legend-row" 
+            onClick={() => setActiveFilter(activeFilter === 'BRIDGE' ? null : 'BRIDGE')}
+            style={{ cursor: 'pointer', opacity: activeFilter && activeFilter !== 'BRIDGE' ? 0.4 : 1, transition: 'opacity 0.2s' }}
+          >
             <div className="legend-dot" style={{ backgroundColor: 'var(--bridge-color)' }}></div>
             Bridge (Cross-Domain)
           </div>
-          <div className="legend-row">
+          <div 
+            className="legend-row" 
+            onClick={() => setActiveFilter(activeFilter === 'UNTAGGED' ? null : 'UNTAGGED')}
+            style={{ cursor: 'pointer', opacity: activeFilter && activeFilter !== 'UNTAGGED' ? 0.4 : 1, transition: 'opacity 0.2s' }}
+          >
             <div className="legend-dot" style={{ backgroundColor: 'var(--accent-primary)' }}></div>
             Untagged Stub
           </div>

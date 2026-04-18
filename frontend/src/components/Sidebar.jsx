@@ -71,7 +71,15 @@ export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisua
               <div key={p.paper_id} className="result-card" style={{ borderLeft: '3px solid #8b5cf6' }}>
                 <div className="result-card-title">{p.title}</div>
                 <div className="result-card-meta">
-                  Score: {p.final_score.toFixed(2)} | Citations: {p.citation_count} | Sim: {p.vector_similarity.toFixed(2)}
+                  Score: {p.final_score?.toFixed(2) || 0} | Citations: {p.citation_count || 0} | Sim: {p.vector_similarity?.toFixed(2) || 0}
+                </div>
+                
+                <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '6px', marginBottom: '8px', fontStyle: 'italic', background: '#161b22', padding: '6px', borderRadius: '4px', borderLeft: '2px solid #58a6ff' }}>
+                  {p.vector_similarity > 0 
+                    ? `🔍 Direct semantic match (${(p.vector_similarity * 100).toFixed(0)}% similar)`
+                    : `🔗 Connected via ${p.hop_distance || '?'} citation hops`}
+                  {(p.citation_count || 0) > 10 && ` | 🏆 Highly cited`}
+                  {(p.hop_distance > 0 && p.vector_similarity > 0) && ` | 💡 Hybrid match`}
                 </div>
                 <button 
                   className="btn" 

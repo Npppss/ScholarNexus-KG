@@ -172,6 +172,35 @@ export default function App() {
     setSelectedNode(nodeData);
   }, []);
 
+  const handleExpandNode = async (arxivId) => {
+    if (!arxivId || !rawGraphData) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`/api/graph/lineage/${arxivId}?direction=both&depth=1`);
+      const newData = await res.json();
+      
+      if (!newData.nodes || newData.nodes.length === 0) return;
+
+      setRawGraphData(prev => {
+        const existingNodeIds = new Set(prev.nodes.map(n => n.paper_id || n.id));
+        const newNodes = newData.nodes.filter(n => !existingNodeIds.has(n.paper_id || n.id));
+        
+        const existingEdges = new Set(prev.edges.map(e => `${e.from}-${e.to}`));
+        const newEdges = newData.edges.filter(e => !existingEdges.has(`${e.from}-${e.to}`));
+
+        return {
+          ...prev,
+          nodes: [...prev.nodes, ...newNodes],
+          edges: [...prev.edges, ...newEdges]
+        };
+      });
+    } catch (err) {
+      alert("Error expanding node: " + err.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const handleExportPNG = () => {
     const canvas = document.querySelector('.vis-network canvas');
     if (!canvas) return;
@@ -314,6 +343,7 @@ export default function App() {
           <GraphView 
             graphData={filteredGraphData} 
             onNodeClick={handleNodeClick} 
+            onExpandNode={handleExpandNode}
           />
           
           <TimelineSlider 
