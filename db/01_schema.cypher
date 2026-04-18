@@ -21,6 +21,10 @@ CREATE INDEX paper_tag       IF NOT EXISTS FOR (p:Paper)  ON (p.personality_tag)
 CREATE INDEX author_name     IF NOT EXISTS FOR (a:Author) ON (a.name);
 CREATE INDEX topic_label     IF NOT EXISTS FOR (t:Topic)  ON (t.label);
 
+// ── Full-Text Index ───────────────────────────────────────────────────────
+CREATE FULLTEXT INDEX paper_title_abstract IF NOT EXISTS
+  FOR (p:Paper) ON EACH [p.title, p.abstract];
+
 // ── Vector Index (Neo4j 5.x, dimensi 768 = Gemini text-embedding-004) ─────
 CREATE VECTOR INDEX paper_embedding_index IF NOT EXISTS
   FOR (p:Paper) ON (p.embedding)
