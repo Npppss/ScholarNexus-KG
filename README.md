@@ -25,7 +25,7 @@
 
 Sistem ini menggunakan pendekatan **Hybrid RAG (Vector + Graph)**:
 1.  **Ingestion Layer:** Ekstraksi PDF menggunakan `pypdf` dan pembersihan teks.
-2.  **Reasoning Layer:** Gemini 1.5 Flash melakukan ekstraksi entitas (Entity Extraction) dan klasifikasi personality.
+2.  **Reasoning Layer:** Gemini 2.5 Flash melakukan ekstraksi entitas (Entity Extraction) dan klasifikasi personality.
 3.  **Graph Layer:** Penyimpanan data ke dalam Neo4j menggunakan skema ontologi yang saling terhubung.
 4.  **Enrichment Layer:** Integrasi ArXiv API untuk memperluas graf berdasarkan referensi yang ditemukan.
 
