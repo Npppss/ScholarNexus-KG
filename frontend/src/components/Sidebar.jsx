@@ -9,10 +9,24 @@ function getSerendipityColor(score, maxScore) {
   return `rgb(${r},${g},${b})`;
 }
 
-export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisualize, searchResults, onSmartSearch, smartSearchResults, onCognitiveSearch, cognitiveResults }) {
+export default function Sidebar({
+  onSearch,
+  onFetchToGraph,
+  onUploadPdf,
+  onVisualize,
+  searchResults,
+  onSmartSearch,
+  smartSearchResults,
+  onCognitiveSearch,
+  cognitiveResults,
+  cognitiveMetrics,
+  onRefreshCognitiveMetrics,
+  onResetCognitiveMetrics
+}) {
   const [query, setQuery] = useState('');
   const [smartQuery, setSmartQuery] = useState('');
   const [cogPaperId, setCogPaperId] = useState('');
+  const [cognitiveProfile, setCognitiveProfile] = useState('balanced');
   const [arxivId, setArxivId] = useState('');
   const [visualizeId, setVisualizeId] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
@@ -114,6 +128,15 @@ export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisua
           Simulate brain-like associative thinking. Discovers surprising connections via spreading activation.
         </div>
         <div className="form-group">
+          <select
+            className="input-field"
+            value={cognitiveProfile}
+            onChange={(e) => setCognitiveProfile(e.target.value)}
+          >
+            <option value="fast">Fast (respon cepat)</option>
+            <option value="balanced">Balanced (recommended)</option>
+            <option value="deep">Deep (eksplorasi luas)</option>
+          </select>
           <input 
             className="input-field"
             type="text" 
@@ -121,8 +144,21 @@ export default function Sidebar({ onSearch, onFetchToGraph, onUploadPdf, onVisua
             value={cogPaperId} 
             onChange={(e) => setCogPaperId(e.target.value)} 
           />
-          <button className="btn btn-primary" onClick={() => onCognitiveSearch(cogPaperId)}>Activate</button>
+          <button className="btn btn-primary" onClick={() => onCognitiveSearch(cogPaperId, cognitiveProfile)}>Activate</button>
         </div>
+
+        {cognitiveMetrics && (
+          <div style={{ marginTop: '8px', fontSize: '11px', color: '#8b949e', background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px' }}>
+            <div style={{ color: '#c9d1d9', marginBottom: '6px' }}>Runtime Metrics</div>
+            <div>Requests: {cognitiveMetrics.requests_total ?? 0}</div>
+            <div>Cache hit rate: {((cognitiveMetrics.cache_hit_rate ?? 0) * 100).toFixed(1)}%</div>
+            <div>Latency avg/p95: {(cognitiveMetrics.latency_ms?.avg ?? 0).toFixed(2)} / {(cognitiveMetrics.latency_ms?.p95 ?? 0).toFixed(2)} ms</div>
+            <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+              <button className="btn" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={onRefreshCognitiveMetrics}>Refresh</button>
+              <button className="btn" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={onResetCognitiveMetrics}>Reset</button>
+            </div>
+          </div>
+        )}
         
         {cognitiveResults && cognitiveResults.length > 0 && (
           <div style={{ marginTop: '16px' }}>

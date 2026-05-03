@@ -1,8 +1,10 @@
 # app/routers/graph.py
-from fastapi import APIRouter, Query
+from typing import Optional
+
+from fastapi import APIRouter, Query, Request
 from fastapi.responses import PlainTextResponse
 from services.graph_service  import graph_service
-from services.vector_service import generate_embedding
+from app.routers.cognitive import cognitive_search as cognitive_search_v2
 
 router = APIRouter(prefix="/graph", tags=["graph"])
 
@@ -88,21 +90,28 @@ async def export_bibtex(arxiv_id: str, depth: int = Query(3, ge=1, le=6)):
 
 @router.post("/cognitive-search/{paper_id}")
 async def cognitive_search(
+    request: Request,
     paper_id: str,
-    decay: float = Query(0.85, ge=0.1, le=0.95),      # Higher decay retention
-    threshold: float = Query(0.01, ge=0.001, le=0.5), # Lower drop-off threshold
-    max_depth: int = Query(6, ge=1, le=8),
-    max_results: int = Query(50, ge=5, le=100),
+    profile: str = Query("balanced"),
+    decay: Optional[float] = Query(None, ge=0.1, le=0.95),
+    threshold: Optional[float] = Query(None, ge=0.001, le=0.5),
+    max_depth: Optional[int] = Query(None, ge=1, le=8),
+    max_results: Optional[int] = Query(None, ge=5, le=100),
+    max_expansions: Optional[int] = Query(None, ge=100, le=20000),
+    no_cache: bool = Query(False),
 ):
     """
-    Cognitive Search — Spreading Activation Network.
-    Simulates human associative thinking to discover serendipitous connections.
+    Legacy endpoint for backward compatibility.
+    Delegates to the canonical Cognitive router handler.
     """
-    from services.cognitive_service import CognitiveSearch
-
-    engine = CognitiveSearch(
-        decay_factor=decay,
+    return await cognitive_search_v2(
+        request=request,
+        paper_id=paper_id,
+        profile=profile,
+        decay=decay,
         threshold=threshold,
         max_depth=max_depth,
+        max_results=max_results,
+        max_expansions=max_expansions,
+        no_cache=no_cache,
     )
-    return engine.activate(paper_id, max_results=max_results)

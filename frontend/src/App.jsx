@@ -11,6 +11,7 @@ export default function App() {
   const [searchResults, setSearchResults] = useState([]);
   const [smartSearchResults, setSmartSearchResults] = useState([]);
   const [cognitiveResults, setCognitiveResults] = useState([]);
+  const [cognitiveMetrics, setCognitiveMetrics] = useState(null);
   const [rawGraphData, setRawGraphData] = useState(null);
   const [selectedNode, setSelectedNode] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -37,9 +38,20 @@ export default function App() {
     }
   };
 
+  const fetchCognitiveMetrics = async () => {
+    try {
+      const res = await fetch('/api/cognitive/metrics');
+      const data = await res.json();
+      setCognitiveMetrics(data);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   useEffect(() => {
     fetchHealth();
     fetchStats();
+    fetchCognitiveMetrics();
     
     // Check for viz_id in URL for Share Links
     const urlParams = new URLSearchParams(window.location.search);
@@ -51,6 +63,7 @@ export default function App() {
     const interval = setInterval(() => {
       fetchHealth();
       fetchStats();
+      fetchCognitiveMetrics();
     }, 15000);
     return () => clearInterval(interval);
   }, []);
@@ -202,18 +215,28 @@ export default function App() {
     }
   };
 
-  const handleCognitiveSearch = async (paperId) => {
+  const handleCognitiveSearch = async (paperId, profile = 'balanced') => {
     if (!paperId) return;
     setLoading(true);
     setCognitiveResults([]);
     try {
-      const res = await fetch(`/api/graph/cognitive-search/${encodeURIComponent(paperId.trim())}`, {
+      const url = `/api/cognitive-search/${encodeURIComponent(paperId.trim())}?profile=${encodeURIComponent(profile)}`;
+      const res = await fetch(url, {
         method: 'POST'
       });
+      const contentType = res.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        const body = await res.text();
+        throw new Error(`Backend returned non-JSON (${res.status}). ${body.slice(0, 140)}`);
+      }
       const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      }
       
       if (data.discoveries && data.discoveries.length > 0) {
         setCognitiveResults(data.discoveries);
+        fetchCognitiveMetrics();
         // Also render the activation graph
         if (data.graph) {
           setRawGraphData(data.graph);
@@ -229,6 +252,19 @@ export default function App() {
       alert("Cognitive Search Error: " + err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleResetCognitiveMetrics = async () => {
+    try {
+      const res = await fetch('/api/cognitive/metrics/reset', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.detail || data.message || `HTTP ${res.status}`);
+      }
+      await fetchCognitiveMetrics();
+    } catch (err) {
+      alert("Metrics Reset Error: " + err.message);
     }
   };
 
@@ -361,6 +397,9 @@ export default function App() {
           onVisualize={handleVisualize}
           onCognitiveSearch={handleCognitiveSearch}
           cognitiveResults={cognitiveResults}
+          cognitiveMetrics={cognitiveMetrics}
+          onRefreshCognitiveMetrics={fetchCognitiveMetrics}
+          onResetCognitiveMetrics={handleResetCognitiveMetrics}
         />
         
         <main className="graph-layout">

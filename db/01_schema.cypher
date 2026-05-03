@@ -17,6 +17,7 @@ CREATE CONSTRAINT topic_id_unique  IF NOT EXISTS
 // ── Standard Indexes ──────────────────────────────────────────────────────
 CREATE INDEX paper_arxiv_id  IF NOT EXISTS FOR (p:Paper)  ON (p.arxiv_id);
 CREATE INDEX paper_year      IF NOT EXISTS FOR (p:Paper)  ON (p.year);
+CREATE INDEX paper_category  IF NOT EXISTS FOR (p:Paper)  ON (p.primary_category);
 CREATE INDEX paper_tag       IF NOT EXISTS FOR (p:Paper)  ON (p.personality_tag);
 CREATE INDEX author_name     IF NOT EXISTS FOR (a:Author) ON (a.name);
 CREATE INDEX topic_label     IF NOT EXISTS FOR (t:Topic)  ON (t.label);
