@@ -1,64 +1,56 @@
 # 🧠 ScholarNexus-KG: Research Lineage & Paper Personality Discovery
 
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-009688?style=flat&logo=FastAPI&logoColor=white)](https://fastapi.tiangolo.com/)
 [![Neo4j](https://img.shields.io/badge/database-Neo4j-018bff.svg)](https://neo4j.com/)
+[![Redis](https://img.shields.io/badge/redis-%23DD0031.svg?style=flat&logo=redis&logoColor=white)](https://redis.io/)
+[![React](https://img.shields.io/badge/react-%2320232a.svg?style=flat&logo=react&logoColor=%2361DAFB)](https://reactjs.org/)
 [![LLM](https://img.shields.io/badge/LLM-Gemini_2.5_Flash-orange.svg)](https://aistudio.google.com/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**ScholarNexus-KG** (sebelumnya dikenal sebagai *KG_personality*) adalah platform berbasis AI yang dirancang untuk memetakan ekosistem riset secara otomatis. Dengan menggabungkan **Knowledge Graphs (KG)** dan **Large Language Models (LLM)**, sistem ini tidak hanya mengekstraksi metadata, tetapi juga menganalisis "kepribadian" (karakteristik kontribusi) sebuah paper serta melacak silsilah penemuan ilmiah (*research lineage*).
+**ScholarNexus-KG** (sebelumnya dikenal sebagai *KG_personality*) adalah platform berbasis AI yang dirancang untuk memetakan ekosistem riset secara otomatis. Dengan menggabungkan **Knowledge Graphs (KG)**, **Vector Embeddings**, dan **Large Language Models (LLM)**, sistem ini mengekstraksi metadata, menganalisis "kepribadian" kontribusi paper, serta melacak silsilah penemuan ilmiah (*research lineage*).
 
 ---
 
 ## ✨ Fitur Utama
 
 * **🎭 Paper Personality Tagging:** Klasifikasi otomatis peran paper dalam literatur:
-    * 🚀 **The Pioneer:** Memperkenalkan paradigma atau arsitektur baru.
-    * 🛠️ **The Optimizer:** Meningkatkan efisiensi/akurasi dari metode yang sudah ada.
-    * 🌉 **The Bridge:** Menghubungkan metode dari satu domain ke domain lainnya.
-* **🕸️ Automated Graph Construction:** Membangun graf hubungan antara Paper, Author, Method, dan Dataset secara *real-time* dari PDF user dan ArXiv API.
-* **🔍 GraphRAG Search:** Melakukan pencarian semantik tingkat lanjut yang mempertimbangkan konteks hubungan antar-paper (bukan sekadar kemiripan teks).
-* **📈 Lineage Discovery:** Menemukan jalur evolusi ide dari paper klasik hingga riset *state-of-the-art* terbaru.
+  * 🚀 **The Pioneer:** Memperkenalkan paradigma atau arsitektur baru.
+  * 🛠️ **The Optimizer:** Meningkatkan efisiensi/akurasi dari metode yang sudah ada.
+  * 🌉 **The Bridge:** Menghubungkan metode dari satu domain ke domain lainnya.
+* **🧠 Cognitive Search (Spreading Activation):** Pencarian *serendipitous* yang terinspirasi dari model kognitif (ACT-R) untuk menemukan paper relevan di luar batasan kemiripan teks langsung.
+* **🔍 Smart GraphRAG:** *Hybrid search* yang menggabungkan *vector search* (768d embeddings), ekspansi graf 2-hop, dan re-ranking berdasarkan metrik sitasi & tahun.
+* **🕸️ Automated Graph Construction:** Membangun graf hubungan entitas secara otomatis dari integrasi *multi-source* (PDF Upload, ArXiv API, dan Semantic Scholar).
+* **📈 Lineage Discovery:** Visualisasi jalur evolusi ide dari paper klasik (fondasi) hingga riset turunan terbarunya.
 
 ---
 
-## 🏗️ Arsitektur Sistem
+## 🏗️ Arsitektur Pipeline
 
-Sistem ini menggunakan pendekatan **Hybrid RAG (Vector + Graph)**:
-1.  **Ingestion Layer:** Ekstraksi PDF menggunakan `pypdf` dan pembersihan teks.
-2.  **Reasoning Layer:** Gemini 1.5 Flash melakukan ekstraksi entitas (Entity Extraction) dan klasifikasi personality.
-3.  **Graph Layer:** Penyimpanan data ke dalam Neo4j menggunakan skema ontologi yang saling terhubung.
-4.  **Enrichment Layer:** Integrasi ArXiv API untuk memperluas graf berdasarkan referensi yang ditemukan.
+Sistem ini diorkestrasi menggunakan **Docker Compose** dan berjalan di atas arsitektur *pipeline* berikut:
+
+1. **Input & Ingestion:** Menerima PDF dari pengguna atau data dari ArXiv API & Semantic Scholar.
+2. **Processing (Pipeline & LLM):** * Ekstraksi teks dari PDF.
+   * **Gemini 2.5 Flash** memproses klasifikasi *personality* dan metadata.
+   * Pembuatan vektor embedding 768-dimensi.
+   * Resolusi referensi silang (*Ref Resolver*) untuk menghindari duplikasi.
+3. **Storage:** **Neo4j** (Graph & Vector Index) untuk relasi permanen dan **Redis** untuk *caching/metrics*.
+4. **Search & Retrieval:** Layanan terpadu untuk GraphRAG, Cognitive Search, dan Lineage Query.
+5. **UI/Frontend:** Antarmuka interaktif berbasis **React + vis.js** untuk eksplorasi graf.
 
 ---
 
-## 📂 Struktur Folder
+## 📂 Struktur Direktori
 
 ```text
 ScholarNexus-KG/
-├── data/
-│   ├── raw/                # PDF yang di-upload user
-│   └── processed/          # Hasil ekstraksi JSON (untuk backup/cache)
-├── src/
-│   ├── extractor/
-│   │   ├── __init__.py
-│   │   ├── pdf_parser.py       # Logika pypdf untuk ambil teks
-│   │   └── personality.py      # Prompt Gemini untuk "The Pioneer", dll.
-│   ├── database/
-│   │   ├── __init__.py
-│   │   ├── neo4j_connection.py # Singleton koneksi ke Neo4j
-│   │   └── cypher_queries.py   # Script untuk simpan & cari Lineage
-│   ├── api/
-│   │   ├── __init__.py
-│   │   └── arxiv_client.py     # Logika ambil data dari ArXiv API
-│   └── utils/
-│       ├── __init__.py
-│       ├── config.py           # Load .env (API Keys, DB URI)
-│       └── helpers.py          # Fungsi bantu (clean text, dll.)
-├── notebooks/
-│   └── exploration.ipynb       # Tempat coba-coba prompt & query graf
-├── .env                        # Rahasia (API Key, Password DB)
-├── .env.example                # Template untuk orang lain
-├── .gitignore                  # Kecualikan .env, venv, & data/
-├── main.py                     # Script utama (Orchestrator)
-├── requirements.txt            # List library (langchain, neo4j, pypdf)
-└── LICENSE                     # MIT License
+├── app/                  # FastAPI routers & entry point utama (app/main.py)
+├── services/             # Business logic (GraphRAG, cognitive/spreading_activation)
+├── pipeline/             # Orkestrasi ekstraksi PDF dan pemrosesan LLM (Gemini)
+├── frontend/             # Aplikasi React UI & visualisasi vis.js
+├── db/                   # Skema Neo4j, Cypher migrations, index/constraints
+├── .env.example          # Template environment variables (API Key, DB URI)
+├── .gitignore            # Exclude .env, venv, cache, dll.
+├── docker-compose.yml    # Orkestrasi multi-container (FastAPI, Neo4j, Redis, UI)
+├── requirements.txt      # List dependencies Python
+└── LICENSE               # MIT License
