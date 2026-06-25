@@ -27,16 +27,11 @@
 
 ## 🏗️ Arsitektur Pipeline
 
-Sistem ini diorkestrasi menggunakan **Docker Compose** dan berjalan di atas arsitektur *pipeline* berikut:
-
-1. **Input & Ingestion:** Menerima PDF dari pengguna atau data dari ArXiv API & Semantic Scholar.
-2. **Processing (Pipeline & LLM):** * Ekstraksi teks dari PDF.
-   * **Gemini 2.5 Flash** memproses klasifikasi *personality* dan metadata.
-   * Pembuatan vektor embedding 768-dimensi.
-   * Resolusi referensi silang (*Ref Resolver*) untuk menghindari duplikasi.
-3. **Storage:** **Neo4j** (Graph & Vector Index) untuk relasi permanen dan **Redis** untuk *caching/metrics*.
-4. **Search & Retrieval:** Layanan terpadu untuk GraphRAG, Cognitive Search, dan Lineage Query.
-5. **UI/Frontend:** Antarmuka interaktif berbasis **React + vis.js** untuk eksplorasi graf.
+Sistem ini menggunakan pendekatan **Hybrid RAG (Vector + Graph)**:
+1.  **Ingestion Layer:** Ekstraksi PDF menggunakan `pypdf` dan pembersihan teks.
+2.  **Reasoning Layer:** Gemini 2.5 Flash melakukan ekstraksi entitas (Entity Extraction) dan klasifikasi personality.
+3.  **Graph Layer:** Penyimpanan data ke dalam Neo4j menggunakan skema ontologi yang saling terhubung.
+4.  **Enrichment Layer:** Integrasi ArXiv API untuk memperluas graf berdasarkan referensi yang ditemukan.
 
 ---
 
