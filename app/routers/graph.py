@@ -1,12 +1,83 @@
 # app/routers/graph.py
+import asyncio
+import logging
 from typing import Optional
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
 from services.graph_service  import graph_service
 from app.routers.cognitive import cognitive_search as cognitive_search_v2
 
+log = logging.getLogger(__name__)
+
 router = APIRouter(prefix="/graph", tags=["graph"])
+
+
+# ── Paper Intelligence: data lengkap untuk Detail Panel ──────────────────────
+@router.get("/paper/{paper_id}/details")
+async def get_paper_details(paper_id: str):
+    """
+    Abstract, TL;DR (problem & contribution), personality + evidence,
+    dan metrik silsilah (in-graph citations, references, lineage role).
+    """
+    resolved = await asyncio.to_thread(graph_service.resolve_paper_id, paper_id)
+    if not resolved:
+        raise HTTPException(404, f"Paper '{paper_id}' not found in graph")
+    details = await asyncio.to_thread(graph_service.get_paper_details, resolved)
+    if not details:
+        raise HTTPException(404, f"Paper '{paper_id}' not found in graph")
+    return details
+
+
+@router.post("/paper/{paper_id}/analyze")
+async def analyze_paper(paper_id: str):
+    """
+    Jalankan DeepSeek R1 on-demand untuk paper yang belum di-tag.
+    Jika abstract belum ada (stub node), abstract diambil dulu dari ArXiv.
+    """
+    from pipeline.personality_tagger import classify_arxiv_paper
+    from services.arxiv_service import arxiv_service
+
+    resolved = await asyncio.to_thread(graph_service.resolve_paper_id, paper_id)
+    if not resolved:
+        raise HTTPException(404, f"Paper '{paper_id}' not found in graph")
+
+    paper = await asyncio.to_thread(graph_service.get_paper_details, resolved)
+    abstract   = paper.get("abstract") or ""
+    categories = [paper["primary_category"]] if paper.get("primary_category") else []
+    fetched_abstract = None
+
+    # Stub node → lengkapi abstract dari ArXiv
+    if not abstract.strip() and paper.get("arxiv_id"):
+        arxiv_paper = await asyncio.to_thread(arxiv_service.fetch_by_id, paper["arxiv_id"])
+        if arxiv_paper:
+            abstract = fetched_abstract = arxiv_paper.abstract
+            categories = arxiv_paper.categories or categories
+
+    if not abstract.strip():
+        raise HTTPException(422, "Abstract tidak tersedia — paper tidak bisa dianalisis.")
+
+    log.info(f"🧠 On-demand reasoning analysis for {resolved}")
+    result = await asyncio.to_thread(
+        classify_arxiv_paper,
+        title=paper.get("title") or "",
+        abstract=abstract,
+        categories=categories,
+        year=paper.get("year"),
+    )
+
+    if result.get("error"):
+        err = result["error"]
+        if "Insufficient Balance" in err or "402" in err or "RESOURCE_EXHAUSTED" in err or "Quota" in err:
+            raise HTTPException(402, "Kuota / saldo API habis. Silakan periksa akun API key Anda.")
+        if "401" in err or "Authentication" in err or "API_KEY_INVALID" in err:
+            raise HTTPException(401, "API key tidak valid. Silakan periksa konfigurasi di .env.")
+        raise HTTPException(502, f"Analisis LLM gagal: {err[:200]}")
+    if not result.get("personality_tag"):
+        raise HTTPException(502, "Model LLM tidak menghasilkan tag yang valid. Silakan coba lagi.")
+
+    await asyncio.to_thread(graph_service.save_paper_analysis, resolved, result, fetched_abstract)
+    return await asyncio.to_thread(graph_service.get_paper_details, resolved)
 
 
 @router.get("/lineage/{arxiv_id}")
