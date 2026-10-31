@@ -4,7 +4,10 @@ from typing import Optional
 import arxiv
 from services.arxiv_service import arxiv_service
 from services.arxiv_service import ArxivPaper
-from services.graph_service import upsert_paper_to_graph, _make_paper_id, driver, MERGE_PAPER, MERGE_CITES
+from services.graph_service import (
+    upsert_paper_to_graph, _make_paper_id, _make_id, driver,
+    MERGE_PAPER, MERGE_CITES, MERGE_AUTHOR, MERGE_AUTHORED_BY
+)
 from services.vector_service import generate_embedding
 from services.semantic_scholar_service import semantic_scholar_service
 from pipeline.personality_tagger import classify_arxiv_paper
@@ -187,9 +190,12 @@ async def _persist_arxiv_paper(paper, fetch_refs: bool):
             "topics":   getattr(paper, "categories", []),
         },
         "personality": {
-            "personality_tag":  personality.get("personality_tag"),
-            "confidence_score": personality.get("confidence_score", 0.0),
-            "reasoning":        personality.get("reasoning", ""),
+            "personality_tag":   personality.get("personality_tag"),
+            "confidence_score":  personality.get("confidence_score", 0.0),
+            "reasoning":         personality.get("reasoning", "") if not personality.get("error") else "",
+            "evidence_quotes":   personality.get("evidence_quotes", []),
+            "problem_statement": personality.get("problem_statement", ""),
+            "key_contribution":  personality.get("key_contribution", ""),
         },
     }
 
@@ -232,6 +238,9 @@ async def _expand_references_background(arxiv_id: str, depth: int):
                 ref_paper_id = _make_paper_id(
                     title=ref.title, year=ref.year, arxiv_id=ref.arxiv_id
                 )
+                ref_authors = getattr(ref, "authors", []) or []
+                ref_authors_text = ", ".join(ref_authors)
+
                 # Create stub Paper node
                 session.run(MERGE_PAPER, {
                     "paper_id":         ref_paper_id,
@@ -247,8 +256,24 @@ async def _expand_references_background(arxiv_id: str, depth: int):
                     "primary_category": None,
                     "embedding":        None,
                     "unresolved":       not ref.found_on_arxiv,
-                    "authors_text":     "",
+                    "authors_text":     ref_authors_text,
                 })
+
+                # Upsert author nodes & relationships
+                for idx, author_name in enumerate(ref_authors):
+                    author_id = _make_id("author", author_name)
+                    session.run(MERGE_AUTHOR, {
+                        "author_id":   author_id,
+                        "name":        author_name,
+                        "affiliation": None,
+                    })
+                    session.run(MERGE_AUTHORED_BY, {
+                        "paper_id":         ref_paper_id,
+                        "author_id":        author_id,
+                        "order":            idx + 1,
+                        "is_corresponding": (idx == 0),
+                    })
+
                 # Create CITES relationship
                 session.run(MERGE_CITES, {
                     "source_paper_id": source_paper_id,
@@ -264,6 +289,9 @@ async def _expand_references_background(arxiv_id: str, depth: int):
                 cit_paper_id = _make_paper_id(
                     title=cit.title, year=cit.year, arxiv_id=cit.arxiv_id
                 )
+                cit_authors = getattr(cit, "authors", []) or []
+                cit_authors_text = ", ".join(cit_authors)
+
                 # Create stub Paper node
                 session.run(MERGE_PAPER, {
                     "paper_id":         cit_paper_id,
@@ -279,8 +307,24 @@ async def _expand_references_background(arxiv_id: str, depth: int):
                     "primary_category": None,
                     "embedding":        None,
                     "unresolved":       not cit.found_on_arxiv,
-                    "authors_text":     "",
+                    "authors_text":     cit_authors_text,
                 })
+
+                # Upsert author nodes & relationships
+                for idx, author_name in enumerate(cit_authors):
+                    author_id = _make_id("author", author_name)
+                    session.run(MERGE_AUTHOR, {
+                        "author_id":   author_id,
+                        "name":        author_name,
+                        "affiliation": None,
+                    })
+                    session.run(MERGE_AUTHORED_BY, {
+                        "paper_id":         cit_paper_id,
+                        "author_id":        author_id,
+                        "order":            idx + 1,
+                        "is_corresponding": (idx == 0),
+                    })
+
                 # Create CITES relationship (citing paper cites source)
                 session.run(MERGE_CITES, {
                     "source_paper_id": cit_paper_id,
