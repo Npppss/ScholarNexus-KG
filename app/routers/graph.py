@@ -5,6 +5,7 @@ from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 from services.graph_service  import graph_service
 from app.routers.cognitive import cognitive_search as cognitive_search_v2
 
@@ -19,6 +20,7 @@ async def get_paper_details(paper_id: str):
     """
     Abstract, TL;DR (problem & contribution), personality + evidence,
     dan metrik silsilah (in-graph citations, references, lineage role).
+    Auto-hydrates stub nodes if abstract or title is missing.
     """
     resolved = await asyncio.to_thread(graph_service.resolve_paper_id, paper_id)
     if not resolved:
@@ -26,17 +28,47 @@ async def get_paper_details(paper_id: str):
     details = await asyncio.to_thread(graph_service.get_paper_details, resolved)
     if not details:
         raise HTTPException(404, f"Paper '{paper_id}' not found in graph")
+
+    # Auto-hydrate stub node if abstract or title is missing but arxiv_id exists
+    has_abstract = bool(details.get("abstract") and details["abstract"].strip())
+    has_clean_title = bool(details.get("title") and not details["title"].startswith("ArXiv"))
+    if (not has_abstract or not has_clean_title) and details.get("arxiv_id"):
+        from services.arxiv_service import arxiv_service
+        try:
+            arxiv_paper = await asyncio.to_thread(arxiv_service.fetch_by_id, details["arxiv_id"])
+            if arxiv_paper:
+                if arxiv_paper.abstract and not has_abstract:
+                    details["abstract"] = arxiv_paper.abstract
+                if arxiv_paper.title and not has_clean_title:
+                    details["title"] = arxiv_paper.title
+                if arxiv_paper.authors and not details.get("authors"):
+                    details["authors"] = arxiv_paper.authors
+                if arxiv_paper.primary_category and not details.get("primary_category"):
+                    details["primary_category"] = arxiv_paper.primary_category
+                
+                await asyncio.to_thread(
+                    graph_service.hydrate_paper_metadata,
+                    resolved,
+                    details.get("abstract") or "",
+                    details.get("authors") or [],
+                    details.get("title") or "",
+                    details.get("primary_category") or ""
+                )
+        except Exception as e:
+            log.warning(f"Could not auto-hydrate paper {resolved}: {e}")
+
     return details
 
 
 @router.post("/paper/{paper_id}/analyze")
 async def analyze_paper(paper_id: str):
     """
-    Jalankan DeepSeek R1 on-demand untuk paper yang belum di-tag.
-    Jika abstract belum ada (stub node), abstract diambil dulu dari ArXiv.
+    Jalankan klasifikasi peran ilmiah on-demand untuk paper yang belum di-tag.
+    Jika abstract belum ada (stub node), abstract diambil dari ArXiv atau OpenAlex.
     """
-    from pipeline.personality_tagger import classify_arxiv_paper
+    from pipeline.personality_tagger import classify_paper_with_fallback
     from services.arxiv_service import arxiv_service
+    from services.openalex_service import openalex_service
 
     resolved = await asyncio.to_thread(graph_service.resolve_paper_id, paper_id)
     if not resolved:
@@ -47,37 +79,148 @@ async def analyze_paper(paper_id: str):
     categories = [paper["primary_category"]] if paper.get("primary_category") else []
     fetched_abstract = None
 
-    # Stub node → lengkapi abstract dari ArXiv
+    # Stub node -> lengkapi abstract dari ArXiv
     if not abstract.strip() and paper.get("arxiv_id"):
-        arxiv_paper = await asyncio.to_thread(arxiv_service.fetch_by_id, paper["arxiv_id"])
-        if arxiv_paper:
-            abstract = fetched_abstract = arxiv_paper.abstract
-            categories = arxiv_paper.categories or categories
+        try:
+            arxiv_paper = await asyncio.to_thread(arxiv_service.fetch_by_id, paper["arxiv_id"])
+            if arxiv_paper and arxiv_paper.abstract:
+                abstract = fetched_abstract = arxiv_paper.abstract
+                categories = arxiv_paper.categories or categories
+        except Exception as e:
+            log.warning(f"ArXiv abstract fetch failed for {resolved}: {e}")
 
-    if not abstract.strip():
-        raise HTTPException(422, "Abstract tidak tersedia — paper tidak bisa dianalisis.")
+    # Fallback -> lengkapi abstract dari OpenAlex berdasarkan judul
+    if not abstract.strip() and paper.get("title"):
+        try:
+            oa_results = await asyncio.to_thread(openalex_service.search_works, paper["title"], 1)
+            if oa_results and oa_results[0].get("abstract"):
+                abstract = fetched_abstract = oa_results[0]["abstract"]
+        except Exception as e:
+            log.warning(f"OpenAlex abstract fetch failed for {resolved}: {e}")
 
-    log.info(f"🧠 On-demand reasoning analysis for {resolved}")
+    log.info(f"Running reasoning analysis for {resolved}")
     result = await asyncio.to_thread(
-        classify_arxiv_paper,
+        classify_paper_with_fallback,
         title=paper.get("title") or "",
         abstract=abstract,
         categories=categories,
         year=paper.get("year"),
     )
 
-    if result.get("error"):
-        err = result["error"]
-        if "Insufficient Balance" in err or "402" in err or "RESOURCE_EXHAUSTED" in err or "Quota" in err:
-            raise HTTPException(402, "Kuota / saldo API habis. Silakan periksa akun API key Anda.")
-        if "401" in err or "Authentication" in err or "API_KEY_INVALID" in err:
-            raise HTTPException(401, "API key tidak valid. Silakan periksa konfigurasi di .env.")
-        raise HTTPException(502, f"Analisis LLM gagal: {err[:200]}")
     if not result.get("personality_tag"):
-        raise HTTPException(502, "Model LLM tidak menghasilkan tag yang valid. Silakan coba lagi.")
+        raise HTTPException(502, "Gagal menghasilkan klasifikasi peran ilmiah.")
 
     await asyncio.to_thread(graph_service.save_paper_analysis, resolved, result, fetched_abstract)
     return await asyncio.to_thread(graph_service.get_paper_details, resolved)
+
+
+class BatchAnalyzeRequest(BaseModel):
+    paper_ids: Optional[list[str]] = None
+    max_papers: int = 8
+
+
+@router.get("/untagged")
+async def get_untagged_nodes(limit: int = Query(15, ge=1, le=50)):
+    """Daftar simpul makalah dalam graf yang belum memiliki klasifikasi personality ilmiah."""
+    papers = await asyncio.to_thread(graph_service.get_untagged_papers, limit)
+    return {"count": len(papers), "papers": papers}
+
+
+@router.post("/batch-analyze")
+async def batch_analyze_papers(payload: BatchAnalyzeRequest):
+    """
+    Jalankan analisis peran ilmiah secara massal (batch)
+    dengan kontrol konkurensi (semaphore) dan fallback cerdas agar seluruh simpul terklasifikasi.
+    """
+    from pipeline.personality_tagger import classify_paper_with_fallback
+    from services.arxiv_service import arxiv_service
+    from services.openalex_service import openalex_service
+
+    target_ids = payload.paper_ids or []
+    if not target_ids:
+        untagged = await asyncio.to_thread(graph_service.get_untagged_papers, payload.max_papers)
+        target_ids = [p["paper_id"] for p in untagged]
+
+    if not target_ids:
+        return {"total": 0, "succeeded": 0, "failed": 0, "results": []}
+
+    target_ids = target_ids[:max(1, min(payload.max_papers, 15))]
+    semaphore = asyncio.Semaphore(2)
+    results = []
+
+    async def process_paper(pid: str):
+        async with semaphore:
+            resolved = await asyncio.to_thread(graph_service.resolve_paper_id, pid)
+            if not resolved:
+                return {"paper_id": pid, "status": "error", "message": "Paper not found"}
+
+            paper = await asyncio.to_thread(graph_service.get_paper_details, resolved)
+            if not paper:
+                return {"paper_id": pid, "status": "error", "message": "Details not found"}
+
+            abstract = paper.get("abstract") or ""
+            categories = [paper["primary_category"]] if paper.get("primary_category") else []
+            fetched_abstract = None
+
+            # Stub node fallback via ArXiv
+            if not abstract.strip() and paper.get("arxiv_id"):
+                try:
+                    arxiv_paper = await asyncio.to_thread(arxiv_service.fetch_by_id, paper["arxiv_id"])
+                    if arxiv_paper and arxiv_paper.abstract:
+                        abstract = fetched_abstract = arxiv_paper.abstract
+                        categories = arxiv_paper.categories or categories
+                except Exception:
+                    pass
+
+            # Stub node fallback via OpenAlex
+            if not abstract.strip() and paper.get("title") and not paper["title"].startswith("ArXiv"):
+                try:
+                    oa_works = await asyncio.to_thread(openalex_service.search_works, paper["title"], 1)
+                    if oa_works and oa_works[0].get("abstract"):
+                        abstract = fetched_abstract = oa_works[0]["abstract"]
+                except Exception:
+                    pass
+
+            try:
+                analysis = await asyncio.to_thread(
+                    classify_paper_with_fallback,
+                    title=paper.get("title") or "",
+                    abstract=abstract,
+                    categories=categories,
+                    year=paper.get("year"),
+                )
+                if not analysis.get("personality_tag"):
+                    return {
+                        "paper_id": pid,
+                        "status": "failed",
+                        "message": analysis.get("error") or "Gagal menentukan peran"
+                    }
+
+                await asyncio.to_thread(graph_service.save_paper_analysis, resolved, analysis, fetched_abstract)
+                return {
+                    "paper_id": resolved,
+                    "requested_id": pid,
+                    "title": paper.get("title"),
+                    "status": "success",
+                    "personality_tag": analysis.get("personality_tag"),
+                    "confidence_score": analysis.get("confidence_score"),
+                    "reasoning": analysis.get("reasoning")
+                }
+            except Exception as e:
+                return {"paper_id": pid, "status": "error", "message": str(e)}
+
+    tasks = [process_paper(pid) for pid in target_ids]
+    completed = await asyncio.gather(*tasks)
+
+    succeeded = sum(1 for c in completed if c.get("status") == "success")
+    failed = len(completed) - succeeded
+
+    return {
+        "total": len(completed),
+        "succeeded": succeeded,
+        "failed": failed,
+        "results": completed
+    }
 
 
 @router.get("/lineage/{arxiv_id}")
