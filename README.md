@@ -156,7 +156,7 @@ ScholarNexus-KG/
 
 1. **Kloning Repositori:**
    ```bash
-   git clone https://github.com/your-username/ScholarNexus-KG.git
+   git clone https://github.com/Npppss/ScholarNexus-KG.git
    cd ScholarNexus-KG
    ```
 
