@@ -209,13 +209,18 @@ class CognitiveSearch:
         query = """
             UNWIND $ids AS pid
             MATCH (p:Paper {paper_id: pid})
+            OPTIONAL MATCH (p)-[:AUTHORED_BY]->(a:Author)
+            WITH p, collect(DISTINCT a.name) AS graph_authors
             RETURN p.paper_id AS paper_id,
                    p.title AS title,
                    p.year AS year,
                    p.arxiv_id AS arxiv_id,
                    p.personality_tag AS personality_tag,
                    p.primary_category AS primary_category,
-                   p.authors_text AS authors_text
+                   CASE 
+                     WHEN p.authors_text IS NOT NULL AND trim(p.authors_text) <> '' THEN p.authors_text
+                     ELSE reduce(s = "", x IN graph_authors | s + (CASE WHEN s = "" THEN "" ELSE ", " END) + x)
+                   END AS authors_text
         """
         with driver.session() as session:
             results = session.run(query, ids=paper_ids)
