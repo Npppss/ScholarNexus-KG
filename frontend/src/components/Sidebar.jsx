@@ -1,262 +1,561 @@
 import { useState } from 'react';
 
-// Interpolate color from cool blue → hot magenta based on serendipity
+// Serendipity color interpolation for associative search
 function getSerendipityColor(score, maxScore) {
   const t = Math.min(1, score / (maxScore || 1));
-  const r = Math.round(58 + t * 152);   // 58 → 210
-  const g = Math.round(166 - t * 100);  // 166 → 66
-  const b = Math.round(255);            // stays purple-ish
+  const r = Math.round(58 + t * 152);
+  const g = Math.round(166 - t * 100);
+  const b = Math.round(255);
   return `rgb(${r},${g},${b})`;
+}
+
+// Check if string looks like an arXiv ID (e.g. "1706.03762", "arxiv:1706.03762", "2005.14165v2")
+export function isArxivId(str) {
+  if (!str) return false;
+  const clean = str.trim().replace(/^arxiv:\s*/i, '');
+  return /^\d{4}\.\d{4,5}(v\d+)?$/i.test(clean);
+}
+
+export function cleanArxivId(str) {
+  if (!str) return '';
+  return str.trim().replace(/^arxiv:\s*/i, '');
 }
 
 export default function Sidebar({
   onSearch,
-  onFetchToGraph,
-  onUploadPdf,
-  onVisualize,
-  searchResults,
   onSmartSearch,
-  smartSearchResults,
   onCognitiveSearch,
-  cognitiveResults,
-  cognitiveMetrics,
-  onRefreshCognitiveMetrics,
-  onResetCognitiveMetrics
+  onOpenAlexSearch,
+  onImportOpenAlex,
+  onExplorePaper,
+  onUploadPdf,
+  searchResults = [],
+  smartSearchResults = [],
+  cognitiveResults = [],
+  openAlexResults = [],
+  recentPapers = [],
+  onSelectRecent,
+  readingList = [],
+  onToggleBookmark,
+  onUpdateReadingStatus,
+  onUpdateReadingNotes,
+  onRemoveFromReadingList,
+  onClearReadingList,
+  onExportReadingListBibtex,
+  showToast
 }) {
+  const [activeTab, setActiveTab] = useState('search'); // 'search' | 'collection' | 'upload'
+  const [searchMode, setSearchMode] = useState('catalog'); // 'catalog' | 'openalex' | 'smart' | 'associative'
   const [query, setQuery] = useState('');
-  const [smartQuery, setSmartQuery] = useState('');
-  const [cogPaperId, setCogPaperId] = useState('');
-  const [cognitiveProfile, setCognitiveProfile] = useState('balanced');
-  const [arxivId, setArxivId] = useState('');
-  const [visualizeId, setVisualizeId] = useState('');
+  const [lastSubmittedQuery, setLastSubmittedQuery] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
+  const [collectionFilter, setCollectionFilter] = useState('all'); // 'all' | 'unread' | 'reading' | 'completed'
+
+  const isIdInput = isArxivId(query);
+
+  const handleSubmit = (e) => {
+    if (e) e.preventDefault();
+    const q = query.trim();
+    if (!q) return;
+
+    setLastSubmittedQuery(q);
+
+    if (isIdInput) {
+      onExplorePaper(cleanArxivId(q), `ArXiv ${cleanArxivId(q)}`);
+      return;
+    }
+
+    if (searchMode === 'catalog') {
+      onSearch(q);
+    } else if (searchMode === 'openalex') {
+      onOpenAlexSearch(q);
+    } else if (searchMode === 'smart') {
+      onSmartSearch(q);
+    } else if (searchMode === 'associative') {
+      onCognitiveSearch(q, 'balanced');
+    }
+  };
+
+  const handleFallbackToCatalog = (targetQuery) => {
+    setSearchMode('catalog');
+    const q = targetQuery || query || lastSubmittedQuery;
+    if (q) {
+      onSearch(q);
+    }
+  };
+
+  const filteredReadingList = readingList.filter(item => {
+    if (collectionFilter === 'all') return true;
+    return (item.status || 'unread') === collectionFilter;
+  });
 
   return (
     <div className="sidebar-layout">
-      {/* 1. Paper Search */}
-      <div className="sidebar-section">
-        <div className="sidebar-title">ArXiv Catalog Search</div>
-        <div className="form-group">
-          <input 
-            className="input-field"
-            type="text" 
-            placeholder="e.g. Knowledge Graph" 
-            value={query} 
-            onChange={(e) => setQuery(e.target.value)} 
-          />
-          <button className="btn btn-primary" onClick={() => onSearch(query)}>Search Catalog</button>
-        </div>
-        
-        {searchResults && searchResults.length > 0 && (
-          <div style={{ marginTop: '16px' }}>
-            <div className="sidebar-title" style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Results</div>
-            {searchResults.map(p => (
-              <div key={p.arxiv_id} className="result-card">
-                <div className="result-card-title">{p.title}</div>
-                <div className="result-card-meta">ID: {p.arxiv_id} | Year: {p.year}</div>
-                <button 
-                  className="btn btn-primary" 
-                  style={{ width: '100%', padding: '4px', fontSize: '11px', marginTop: '6px' }}
-                  onClick={() => {
-                    setArxivId(p.arxiv_id);
-                    setVisualizeId(p.arxiv_id);
-                    onFetchToGraph(p.arxiv_id); // Langsung masukkan ke Graph
-                  }}
-                >
-                  Ingest & Visualize
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* ── Tab Switcher: Cari Riset vs Koleksi Bacaan vs Unggah PDF ──────── */}
+      <div className="sidebar-tabs">
+        <button 
+          className={`sidebar-tab ${activeTab === 'search' ? 'active' : ''}`}
+          onClick={() => setActiveTab('search')}
+        >
+          Pencarian & Silsilah
+        </button>
+        <button 
+          className={`sidebar-tab ${activeTab === 'collection' ? 'active' : ''}`}
+          onClick={() => setActiveTab('collection')}
+        >
+          Koleksi
+          {readingList.length > 0 && (
+            <span className="tab-counter-badge">{readingList.length}</span>
+          )}
+        </button>
+        <button 
+          className={`sidebar-tab ${activeTab === 'upload' ? 'active' : ''}`}
+          onClick={() => setActiveTab('upload')}
+        >
+          Unggah Dokumen
+        </button>
       </div>
 
-      {/* 1b. Smart Discovery (GraphRAG) */}
-      <div className="sidebar-section">
-        <div className="sidebar-title">GraphRAG Smart Discovery</div>
-        <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '8px' }}>
-          Discover AI-curated papers combining semantic meaning & citation paths.
-        </div>
-        <div className="form-group">
-          <input 
-            className="input-field"
-            type="text" 
-            placeholder="e.g. transformers context rules" 
-            value={smartQuery} 
-            onChange={(e) => setSmartQuery(e.target.value)} 
-          />
-          <button className="btn btn-primary" onClick={() => onSmartSearch(smartQuery)}>Discover</button>
-        </div>
-        
-        {smartSearchResults && smartSearchResults.length > 0 && (
-          <div style={{ marginTop: '16px' }}>
-            <div className="sidebar-title" style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>AI Ranked Results</div>
-            {smartSearchResults.map(p => (
-              <div key={p.paper_id} className="result-card" style={{ borderLeft: '3px solid #8b5cf6' }}>
-                <div className="result-card-title">{p.title}</div>
-                <div className="result-card-meta">
-                  Score: {p.final_score?.toFixed(2) || 0} | Citations: {p.citation_count || 0} | Sim: {p.vector_similarity?.toFixed(2) || 0}
-                </div>
-                
-                <div style={{ fontSize: '11px', color: '#8b949e', marginTop: '6px', marginBottom: '8px', fontStyle: 'italic', background: '#161b22', padding: '6px', borderRadius: '4px', borderLeft: '2px solid #58a6ff' }}>
-                  {p.vector_similarity > 0 
-                    ? `🔍 Direct semantic match (${(p.vector_similarity * 100).toFixed(0)}% similar)`
-                    : `🔗 Connected via ${p.hop_distance || '?'} citation hops`}
-                  {(p.citation_count || 0) > 10 && ` | 🏆 Highly cited`}
-                  {(p.hop_distance > 0 && p.vector_similarity > 0) && ` | 💡 Hybrid match`}
-                </div>
-                <button 
-                  className="btn" 
-                  style={{ width: '100%', padding: '4px', fontSize: '11px', marginTop: '6px' }}
-                  onClick={() => {
-                     setVisualizeId(p.paper_id ?? p.arxiv_id);
-                     onVisualize(p.paper_id ?? p.arxiv_id);
-                  }}
+      {/* ── TAB 1: PENCARIAN & SILSILAH ──────────────────────────────────── */}
+      {activeTab === 'search' && (
+        <>
+          {/* Universal Search Bar */}
+          <div className="sidebar-section">
+            <div className="sidebar-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <span>Pencarian Literatur</span>
+              {isIdInput && <span className="id-detected-badge">ArXiv ID Terdeteksi</span>}
+            </div>
+
+            <form onSubmit={handleSubmit} className="form-group">
+              <div className="universal-search-wrapper">
+                <input 
+                  className="input-field universal-search-input"
+                  type="text" 
+                  placeholder={
+                    searchMode === 'associative' 
+                      ? "Masukkan Paper ID untuk eksplorasi..."
+                      : searchMode === 'openalex'
+                        ? "Cari jutaan naskah global (OpenAlex)..."
+                        : "Topik riset, judul, atau ArXiv ID (1706.03762)..."
+                  }
+                  value={query} 
+                  onChange={(e) => setQuery(e.target.value)} 
+                />
+              </div>
+
+              {/* Search Mode Pills */}
+              <div className="search-mode-pills" style={{ gridTemplateColumns: 'repeat(4, 1fr)' }}>
+                <button
+                  type="button"
+                  className={`mode-pill ${searchMode === 'catalog' ? 'active' : ''}`}
+                  onClick={() => setSearchMode('catalog')}
+                  title="Pencarian katalog ArXiv langsung"
                 >
-                  Visualize Lineage ({p.year ?? 'Unknown'})
+                  ArXiv
+                </button>
+                <button
+                  type="button"
+                  className={`mode-pill ${searchMode === 'openalex' ? 'active' : ''}`}
+                  onClick={() => setSearchMode('openalex')}
+                  title="Pencarian katalog global OpenAlex (250+ juta karya)"
+                >
+                  OpenAlex
+                </button>
+                <button
+                  type="button"
+                  className={`mode-pill ${searchMode === 'smart' ? 'active' : ''}`}
+                  onClick={() => setSearchMode('smart')}
+                  title="Pencarian semantik cerdas + graph ranking"
+                >
+                  Smart Graph
+                </button>
+                <button
+                  type="button"
+                  className={`mode-pill ${searchMode === 'associative' ? 'active' : ''}`}
+                  onClick={() => setSearchMode('associative')}
+                  title="Eksplorasi asosiatif ide tersembunyi"
+                >
+                  Asosiatif
                 </button>
               </div>
-            ))}
-          </div>
-        )}
-      </div>
 
-      {/* 1c. Cognitive Search (Spreading Activation) */}
-      <div className="sidebar-section">
-        <div className="sidebar-title">🧠 Cognitive Search</div>
-        <div style={{ fontSize: '10px', color: '#94a3b8', marginBottom: '8px' }}>
-          Simulate brain-like associative thinking. Discovers surprising connections via spreading activation.
+              <button 
+                type="submit" 
+                className="btn btn-primary"
+                style={{ width: '100%', marginTop: '4px' }}
+              >
+                {isIdInput 
+                  ? 'Buka Silsilah Graf' 
+                  : searchMode === 'catalog' 
+                    ? 'Cari Literatur' 
+                    : searchMode === 'openalex'
+                      ? 'Cari di OpenAlex Global'
+                      : searchMode === 'smart' 
+                        ? 'Temukan Paper Terkait' 
+                        : 'Aktifkan Jalur Asosiatif'}
+              </button>
+            </form>
+          </div>
+
+          {/* Riwayat Eksplorasi Cepat */}
+          {recentPapers && recentPapers.length > 0 && (
+            <div className="sidebar-section recent-section">
+              <div className="sidebar-title">Riwayat Penelusuran</div>
+              <div className="recent-list">
+                {recentPapers.slice(0, 5).map((p, idx) => (
+                  <button 
+                    key={idx} 
+                    className="recent-chip"
+                    onClick={() => onSelectRecent(p.id, p.title)}
+                    title={p.title}
+                  >
+                    <span className="recent-bullet">&bull;</span>
+                    <span className="recent-text">{p.title || p.id}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Hasil Pencarian: ArXiv Catalog */}
+          {searchMode === 'catalog' && searchResults && searchResults.length > 0 && (
+            <div className="sidebar-section results-container">
+              <div className="sidebar-title">
+                Hasil Pencarian ArXiv ({searchResults.length})
+              </div>
+              {searchResults.map(p => (
+                <div key={p.arxiv_id} className="result-card simplified-card">
+                  <div className="result-card-title">{p.title}</div>
+                  <div className="result-card-meta">
+                    <span className="meta-badge">{p.arxiv_id}</span>
+                    <span>Tahun: {p.year || 'N/A'}</span>
+                  </div>
+                  {p.summary && (
+                    <div className="result-snippet">
+                      {p.summary.slice(0, 140)}…
+                    </div>
+                  )}
+                  <button 
+                    className="btn btn-primary btn-explore"
+                    onClick={() => onExplorePaper(p.arxiv_id, p.title)}
+                  >
+                    Eksplorasi Silsilah
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Hasil Pencarian: OpenAlex Global Catalog */}
+          {searchMode === 'openalex' && openAlexResults && openAlexResults.length > 0 && (
+            <div className="sidebar-section results-container">
+              <div className="sidebar-title">
+                Hasil OpenAlex Global ({openAlexResults.length})
+              </div>
+              {openAlexResults.map((p, idx) => (
+                <div key={idx} className="result-card simplified-card openalex-card">
+                  <div className="result-card-title">{p.title}</div>
+                  <div className="result-card-meta">
+                    <span className="meta-badge">Tahun: {p.year || 'N/A'}</span>
+                    <span className="openalex-citations-badge">{p.citation_count || 0} Sitasi Global</span>
+                  </div>
+                  {p.authors?.length > 0 && (
+                    <div className="result-snippet" style={{ fontStyle: 'normal' }}>
+                      Penulis: {p.authors.slice(0, 3).join(', ')}{p.authors.length > 3 ? ' et al.' : ''}
+                    </div>
+                  )}
+                  {p.abstract && (
+                    <div className="result-snippet">
+                      {p.abstract.slice(0, 130)}…
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                    <button 
+                      className="btn btn-primary btn-explore"
+                      style={{ flex: 1 }}
+                      onClick={() => onImportOpenAlex(p)}
+                    >
+                      Impor & Visualisasikan
+                    </button>
+                    {p.pdf_url && (
+                      <a 
+                        href={p.pdf_url} 
+                        target="_blank" 
+                        rel="noopener noreferrer"
+                        className="btn btn-ghost btn-sm"
+                        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 8px', textDecoration: 'none' }}
+                        title="Unduh PDF Open Access"
+                      >
+                        PDF
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Hasil Pencarian: AI Smart Discovery (GraphRAG) */}
+          {searchMode === 'smart' && (
+            <>
+              {smartSearchResults && smartSearchResults.length > 0 ? (
+                <div className="sidebar-section results-container">
+                  <div className="sidebar-title">
+                    Rekomendasi AI Graph ({smartSearchResults.length})
+                  </div>
+                  {smartSearchResults.map(p => (
+                    <div key={p.paper_id || p.arxiv_id} className="result-card simplified-card smart-card">
+                      <div className="result-card-title">{p.title}</div>
+                      <div className="result-card-meta">
+                        <span className="meta-badge">arxiv:{p.arxiv_id || 'ID'}</span>
+                        <span>Sitasi: {p.citation_count || 0}</span>
+                      </div>
+                      <div className="smart-badge-reason">
+                        {p.hop_distance === 0 
+                          ? 'Kesesuaian semantik langsung tingkat tinggi' 
+                          : `Terhubung melalui ${p.hop_distance} jalur sitasi`}
+                      </div>
+                      <button 
+                        className="btn btn-primary btn-explore"
+                        onClick={() => onExplorePaper(p.arxiv_id || p.paper_id, p.title)}
+                      >
+                        Visualisasi Silsilah
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="sidebar-section">
+                  <div className="search-fallback-banner">
+                    <div className="fallback-title">Belum Tersimpan di Graf Lokal</div>
+                    <div className="fallback-desc">
+                      Makalah dengan kata kunci ini belum ada di basis data graf lokal.
+                    </div>
+                    <div className="fallback-hint-box">
+                      <span>Cari langsung ke katalog global:</span>
+                      <button 
+                        className="link-btn-highlight"
+                        onClick={() => handleFallbackToCatalog(query || lastSubmittedQuery)}
+                      >
+                        Beralih ke Pencarian ArXiv Global &rarr;
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Hasil Pencarian: Associative Search */}
+          {searchMode === 'associative' && cognitiveResults && cognitiveResults.length > 0 && (
+            <div className="sidebar-section results-container">
+              <div className="sidebar-title">
+                Koneksi Asosiatif ({cognitiveResults.length})
+              </div>
+              {cognitiveResults.map(p => (
+                <div key={p.paper_id} className="result-card simplified-card associative-card">
+                  <div className="result-card-title">{p.title}</div>
+                  <div className="result-card-meta">
+                    <span className="meta-badge" style={{ borderColor: getSerendipityColor(p.serendipity_score, 1) }}>
+                      Energi: {(p.activation_energy || 0).toFixed(2)}
+                    </span>
+                    <span>Tahun: {p.year || 'N/A'}</span>
+                  </div>
+                  <div className="associative-badge-reason">
+                    {p.serendipity_reason || `Terhubung via ${p.depth || 1} lompatan asosiatif`}
+                  </div>
+                  <button 
+                    className="btn btn-primary btn-explore"
+                    onClick={() => onExplorePaper(p.arxiv_id || p.paper_id, p.title)}
+                  >
+                    Eksplorasi Jalur Ini
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ── TAB 2: DAFTAR KOLEKSI BACAAN ─────────────────────────────────── */}
+      {activeTab === 'collection' && (
+        <div className="collection-view">
+          <div className="collection-header">
+            <div className="sidebar-title" style={{ marginBottom: 0 }}>
+              Daftar Bacaan ({readingList.length})
+            </div>
+            <div className="collection-actions">
+              <button 
+                className="btn btn-ghost btn-sm"
+                onClick={onExportReadingListBibtex}
+                disabled={readingList.length === 0}
+                title="Ekspor seluruh naskah tersimpan ke file BibTeX"
+              >
+                BibTeX
+              </button>
+              {readingList.length > 0 && (
+                <button 
+                  className="btn btn-ghost btn-sm btn-danger"
+                  onClick={onClearReadingList}
+                  title="Kosongkan seluruh daftar bacaan"
+                >
+                  Kosongkan
+                </button>
+              )}
+            </div>
+          </div>
+
+          {/* Status Filters */}
+          <div className="collection-filter-pills">
+            <button 
+              className={`filter-pill ${collectionFilter === 'all' ? 'active' : ''}`}
+              onClick={() => setCollectionFilter('all')}
+            >
+              Semua ({readingList.length})
+            </button>
+            <button 
+              className={`filter-pill ${collectionFilter === 'unread' ? 'active' : ''}`}
+              onClick={() => setCollectionFilter('unread')}
+            >
+              Belum ({readingList.filter(i => (i.status || 'unread') === 'unread').length})
+            </button>
+            <button 
+              className={`filter-pill ${collectionFilter === 'reading' ? 'active' : ''}`}
+              onClick={() => setCollectionFilter('reading')}
+            >
+              Dibaca ({readingList.filter(i => i.status === 'reading').length})
+            </button>
+            <button 
+              className={`filter-pill ${collectionFilter === 'completed' ? 'active' : ''}`}
+              onClick={() => setCollectionFilter('completed')}
+            >
+              Selesai ({readingList.filter(i => i.status === 'completed').length})
+            </button>
+          </div>
+
+          {filteredReadingList.length > 0 ? (
+            <div className="collection-list">
+              {filteredReadingList.map((item) => {
+                const targetId = item.arxiv_id || item.paper_id || item.id;
+                return (
+                  <div key={targetId} className="collection-card">
+                    <div className="collection-card-top">
+                      <span className={`status-badge status-${item.status || 'unread'}`}>
+                        {item.status === 'completed' 
+                          ? 'Selesai Dibaca' 
+                          : item.status === 'reading' 
+                            ? 'Sedang Dibaca' 
+                            : 'Belum Dibaca'}
+                      </span>
+                      <span className="collection-year">{item.year || 'N/A'}</span>
+                    </div>
+                    <div className="collection-card-title">{item.title}</div>
+                    
+                    {/* Status Selector */}
+                    <div className="collection-status-select-row">
+                      <span className="status-label">Status Bacaan:</span>
+                      <select 
+                        className="status-select"
+                        value={item.status || 'unread'}
+                        onChange={(e) => onUpdateReadingStatus(targetId, e.target.value)}
+                      >
+                        <option value="unread">Belum Dibaca</option>
+                        <option value="reading">Sedang Dibaca</option>
+                        <option value="completed">Selesai Dibaca</option>
+                      </select>
+                    </div>
+
+                    {/* Quick Notes Memo */}
+                    <input 
+                      type="text"
+                      className="collection-notes-input"
+                      placeholder="Catatan riset pribadi..."
+                      value={item.notes || ''}
+                      onChange={(e) => onUpdateReadingNotes(targetId, e.target.value)}
+                    />
+
+                    <div className="collection-card-actions">
+                      <button 
+                        className="btn btn-primary btn-sm"
+                        style={{ flex: 1, fontSize: '11px' }}
+                        onClick={() => onExplorePaper(targetId, item.title)}
+                      >
+                        Buka di Graf
+                      </button>
+                      <button 
+                        className="btn btn-ghost btn-sm"
+                        style={{ fontSize: '11px' }}
+                        onClick={() => onSelectRecent(targetId, item.title)}
+                      >
+                        Detail
+                      </button>
+                      <button 
+                        className="btn btn-ghost btn-sm btn-remove"
+                        style={{ fontSize: '11px', color: '#ff7b72' }}
+                        onClick={() => onRemoveFromReadingList(targetId)}
+                        title="Hapus dari daftar bacaan"
+                      >
+                        Hapus
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="collection-empty">
+              <div className="collection-empty-title">Koleksi Masih Kosong</div>
+              <p className="collection-empty-desc">
+                Buka metadata naskah apa pun dan klik tombol "Simpan ke Daftar Bacaan" untuk menandai artikel riset yang ingin dipelajari.
+              </p>
+            </div>
+          )}
         </div>
-        <div className="form-group">
-          <select
-            className="input-field"
-            value={cognitiveProfile}
-            onChange={(e) => setCognitiveProfile(e.target.value)}
+      )}
+
+      {/* ── TAB 3: UNGGAH DOKUMEN (PDF) ─────────────────────────────────── */}
+      {activeTab === 'upload' && (
+        <div className="sidebar-section">
+          <div className="sidebar-title">Unggah Dokumen (PDF)</div>
+          
+          <div className="upload-guide-box" style={{ marginBottom: 16 }}>
+            <div>
+              Unggah file PDF jurnal atau pra-cetak untuk diekstraksi ke dalam graf.
+              Model penalaran akan mengklasifikasikan kepribadian ilmiahnya secara otomatis.
+            </div>
+          </div>
+
+          <div className="file-drop-area">
+            <input 
+              type="file" 
+              accept=".pdf" 
+              className="file-input"
+              onChange={(e) => setSelectedFile(e.target.files[0])} 
+            />
+            <div className="file-label">
+              {selectedFile ? (
+                <span className="file-name">{selectedFile.name}</span>
+              ) : (
+                'Klik atau seret file PDF ke sini'
+              )}
+            </div>
+          </div>
+
+          <button 
+            className="btn btn-primary" 
+            style={{ width: '100%', marginTop: 16 }}
+            disabled={!selectedFile}
+            onClick={() => {
+              if (selectedFile) {
+                onUploadPdf(selectedFile);
+                setSelectedFile(null);
+              }
+            }}
           >
-            <option value="fast">Fast (respon cepat)</option>
-            <option value="balanced">Balanced (recommended)</option>
-            <option value="deep">Deep (eksplorasi luas)</option>
-          </select>
-          <input 
-            className="input-field"
-            type="text" 
-            placeholder="Paper ID (e.g. arxiv:2401.xxxxx)" 
-            value={cogPaperId} 
-            onChange={(e) => setCogPaperId(e.target.value)} 
-          />
-          <button className="btn btn-primary" onClick={() => onCognitiveSearch(cogPaperId, cognitiveProfile)}>Activate</button>
-        </div>
-
-        {cognitiveMetrics && (
-          <div style={{ marginTop: '8px', fontSize: '11px', color: '#8b949e', background: '#161b22', border: '1px solid #30363d', borderRadius: '6px', padding: '8px' }}>
-            <div style={{ color: '#c9d1d9', marginBottom: '6px' }}>Runtime Metrics</div>
-            <div>Requests: {cognitiveMetrics.requests_total ?? 0}</div>
-            <div>Cache hit rate: {((cognitiveMetrics.cache_hit_rate ?? 0) * 100).toFixed(1)}%</div>
-            <div>Latency avg/p95: {(cognitiveMetrics.latency_ms?.avg ?? 0).toFixed(2)} / {(cognitiveMetrics.latency_ms?.p95 ?? 0).toFixed(2)} ms</div>
-            <div style={{ display: 'flex', gap: '6px', marginTop: '8px' }}>
-              <button className="btn" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={onRefreshCognitiveMetrics}>Refresh</button>
-              <button className="btn" style={{ padding: '4px 8px', fontSize: '11px' }} onClick={onResetCognitiveMetrics}>Reset</button>
-            </div>
-          </div>
-        )}
-        
-        {cognitiveResults && cognitiveResults.length > 0 && (
-          <div style={{ marginTop: '16px' }}>
-            <div className="sidebar-title" style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>
-              🔮 Serendipity Discoveries ({cognitiveResults.length})
-            </div>
-            {cognitiveResults.slice(0, 8).map((p, i) => (
-              <div key={p.paper_id} className="result-card" style={{ borderLeft: `3px solid ${getSerendipityColor(p.serendipity_score, cognitiveResults[0]?.serendipity_score || 1)}` }}>
-                <div className="result-card-title">{p.title || 'Unknown'}</div>
-                <div className="result-card-meta">
-                  Depth: {p.depth} hops | Energy: {p.activation_energy?.toFixed(3)}
-                </div>
-                <div style={{ 
-                  fontSize: '11px', color: '#8b949e', marginTop: '6px', marginBottom: '8px', 
-                  fontStyle: 'italic', background: '#161b22', padding: '6px', borderRadius: '4px', 
-                  borderLeft: '2px solid #d2a8ff' 
-                }}>
-                  {p.serendipity_score > 0.3 
-                    ? `🌟 High serendipity! Unexpected connection at depth ${p.depth}`
-                    : p.depth <= 1 
-                      ? `🔗 Direct neighbor — strong association`
-                      : `🧩 Distant connection (${p.depth} hops) — creative link`}
-                  {p.personality_tag && ` | 🏷 ${p.personality_tag}`}
-                </div>
-                <button 
-                  className="btn" 
-                  style={{ width: '100%', padding: '4px', fontSize: '11px', marginTop: '4px' }}
-                  onClick={() => {
-                    setVisualizeId(p.arxiv_id || p.paper_id);
-                    onVisualize(p.arxiv_id || p.paper_id);
-                  }}
-                >
-                  Explore Lineage ({p.year ?? '?'})
-                </button>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* 2. Save Process */}
-      <div className="sidebar-section">
-        <div className="sidebar-title">Save to Graph Database</div>
-        <div className="form-group">
-          <input 
-            className="input-field"
-            type="text" 
-            placeholder="ArXiv ID..." 
-            value={arxivId} 
-            onChange={(e) => setArxivId(e.target.value)} 
-          />
-          <button className="btn" onClick={() => {
-            onFetchToGraph(arxivId);
-            setVisualizeId(arxivId);
-          }}>
-            Ingest Paper
+            Ekstraksi & Analisis PDF
           </button>
         </div>
-      </div>
-
-      {/* 3. Upload PDF Paper */}
-      <div className="sidebar-section">
-        <div className="sidebar-title">Upload PDF Paper</div>
-        <div className="form-group">
-          <input 
-            className="input-field"
-            type="file" 
-            accept="application/pdf"
-            onChange={(e) => setSelectedFile(e.target.files[0])} 
-          />
-          <button className="btn" onClick={() => {
-            if (selectedFile) {
-              onUploadPdf(selectedFile);
-            } else {
-              alert("Please select a PDF file first");
-            }
-          }}>
-            Upload & Ingest
-          </button>
-        </div>
-      </div>
-
-      {/* 4. Visualization */}
-      <div className="sidebar-section">
-        <div className="sidebar-title">Lineage Visualization</div>
-        <div className="form-group">
-          <input 
-            className="input-field"
-            type="text" 
-            placeholder="Available ArXiv ID..." 
-            value={visualizeId} 
-            onChange={(e) => setVisualizeId(e.target.value)} 
-          />
-          <button className="btn btn-primary" onClick={() => onVisualize(visualizeId)}>
-            Render Graph
-          </button>
-        </div>
-      </div>
+      )}
     </div>
   );
 }
