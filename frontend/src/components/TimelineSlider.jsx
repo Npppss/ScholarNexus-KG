@@ -21,13 +21,12 @@ export default function TimelineSlider({ minYear, maxYear, currentYear, onChange
       }, 1200); // 1.2 detik per frame
     }
     return () => clearInterval(intervalRef.current);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isPlaying, maxYear, minYear, onChange]);
 
   if (!minYear || !maxYear || minYear === maxYear) {
     return (
       <div className="timeline-layout">
-        <span className="timeline-label">Timeline filter unavailable for current dataset.</span>
+        <span className="timeline-label">Filter linimasa tahun tidak tersedia untuk dataset ini.</span>
       </div>
     );
   }
@@ -36,11 +35,26 @@ export default function TimelineSlider({ minYear, maxYear, currentYear, onChange
     <div className="timeline-layout">
       <button 
         className="btn"
-        style={{ padding: '4px 12px', fontSize: '12px', minWidth: '32px', marginRight: '16px', borderRadius: '50%' }}
+        style={{ padding: '6px 12px', fontSize: '11px', minWidth: '60px', marginRight: '16px', borderRadius: '4px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '6px' }}
         onClick={() => setIsPlaying(!isPlaying)}
-        title={isPlaying ? "Pause Animation" : "Play Timeline Animation"}
+        title={isPlaying ? "Jeda Animasi Linimasa" : "Jalankan Animasi Linimasa"}
       >
-        {isPlaying ? '⏸' : '▶'}
+        {isPlaying ? (
+          <>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <rect x="6" y="4" width="4" height="16" />
+              <rect x="14" y="4" width="4" height="16" />
+            </svg>
+            <span>Jeda</span>
+          </>
+        ) : (
+          <>
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="currentColor">
+              <polygon points="5 3 19 12 5 21 5 3" />
+            </svg>
+            <span>Putar</span>
+          </>
+        )}
       </button>
       <div className="timeline-track">
         <span className="timeline-label">{minYear}</span>
@@ -51,14 +65,14 @@ export default function TimelineSlider({ minYear, maxYear, currentYear, onChange
           max={maxYear}
           value={currentYear}
           onChange={(e) => {
-            setIsPlaying(false); // Stop playing if user manually drags
+            setIsPlaying(false);
             onChange(parseInt(e.target.value, 10));
           }}
         />
         <span className="timeline-label">{maxYear}</span>
       </div>
       <div className="timeline-label" style={{ marginLeft: '16px', fontWeight: '600' }}>
-        Filter: &le; {currentYear}
+        Tahun: &le; {currentYear}
       </div>
     </div>
   );
