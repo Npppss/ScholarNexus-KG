@@ -8,7 +8,7 @@ from neo4j import GraphDatabase
 import logging
 
 from app.config.settings import settings
-from app.routers import paper, arxiv, graph, search, maintenance, cognitive
+from app.routers import paper, arxiv, graph, search, maintenance, cognitive, scholar
 from services.maintenance_service import maintenance_service
 
 logger = logging.getLogger(__name__)
@@ -141,6 +141,7 @@ app.include_router(graph.router)
 app.include_router(search.router)
 app.include_router(maintenance.router)
 app.include_router(cognitive.router)
+app.include_router(scholar.router)
 
 
 # ── Health check endpoint (dipakai Docker healthcheck) ────────────────────
