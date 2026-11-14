@@ -10,11 +10,6 @@
 
 **ScholarNexus-KG** adalah platform penelusuran silsilah riset dan tinjauan pustaka ilmiah berbasis AI yang mengintegrasikan **Knowledge Graph (Neo4j)**, **Vector Embeddings**, dan **Large Language Models (LLM)**. Platform ini dirancang untuk memetakan evolusi ide, menganalisis kontribusi ilmiah, serta menghubungkan keterkaitan metodologi antar-naskah penelitian secara otomatis.
 
-Dokumentasi perancangan dan analisis sistem:
-* [Solusi yang Diajukan & Alur Pengguna (Proposed Solution & Core User Flow)](docs/PROPOSED_SOLUTION_AND_USER_FLOW.md)
-* [Komparasi Diferensiasi dengan Google Scholar, Perplexity AI, & NotebookLM](docs/HOW_IT_DIFFERS_FROM_EXISTING_ALTERNATIVES.md)
-* [Spesifikasi Teknologi & Peran AI (Planned Technologies & Role of AI)](docs/PLANNED_TECHNOLOGIES.md)
-
 ---
 
 ## Target Pengguna
